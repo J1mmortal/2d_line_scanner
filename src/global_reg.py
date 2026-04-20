@@ -18,6 +18,8 @@ class Registration:
             self.pcd.points = mesh.vertices
             self.pcd.normals = mesh.vertex_normals
 
+            # pcd = mesh.sample_points_poisson_disk(number_of_points=50_000) # Use for more uniform sampling
+
     def preprocess(self, pcd):
         pcd_down = pcd.voxel_down_sample(self.course_voxel)
         pcd_down.estimate_normals(
@@ -129,9 +131,16 @@ o3d.visualization.draw_geometries(
     [src, tgt], window_name="BEFORE", width=800, height=600
 )
 
-o3d.visualization.draw_geometries(
-    [alg_src, tgt], window_name="AFTER", width=800, height=600
-)
+# o3d.visualization.draw_geometries(
+#     [alg_src, tgt], window_name="AFTER", width=800, height=600
+# )
+
+# diff = np.asarray(tgt.points) - np.asarray(alg_src.points)
+# print(diff)
+
+# o3d.visualization.draw_plotly(
+#     [alg_src, tgt], window_name="AFTER", width=800, height=600
+# )
 
 # vis = o3d.visualization.Visualizer()
 # vis.create_window(window_name="Registration Result", width=1280, height=720)
