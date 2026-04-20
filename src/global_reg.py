@@ -66,26 +66,49 @@ class Registration:
         )
         return result
 
+    def refine_icp(self, source, target, init_transform):
+        result = o3d.pipelines.registration.registration_icp(
+            source,
+            target,
+            max_correspondence_distance=self.voxel_size * 0.4,
+            init=init_transform,
+            estimation_method=o3d.pipelines.registration.TransformationEstimationPointToPlane(),
+        )
+        return result
+
     def register(self, source, target):
         src_down = self.preprocess(source)
         tgt_down = self.preprocess(target)
+
         src_fpfh = self.compute_fpfh(src_down)
         tgt_fpfh = self.compute_fpfh(tgt_down)
+
         ransac_result = self.global_registration_ransac(
             src_down, tgt_down, src_fpfh, tgt_fpfh
         )
-        transformation = ransac_result.transformation
-        fitness = ransac_result.fitness
-        rmse = ransac_result.inlier_rmse
-        return transformation, fitness, rmse
+
+        # transformation = ransac_result.transformation
+        # fitness = ransac_result.fitness
+        # rmse = ransac_result.inlier_rmse
+
+        icp_result = self.refine_icp(source, target, ransac_result.transformation)
+
+        return icp_result, ransac_result
 
 
 dataset = o3d.data.DemoICPPointClouds()
 src = o3d.io.read_point_cloud(dataset.paths[0])
 tgt = o3d.io.read_point_cloud(dataset.paths[1])
 
+# dataset = o3d.data.DemoColoredICPPointClouds()
+# src = o3d.io.read_point_cloud(dataset.paths[0])
+# tgt = o3d.io.read_point_cloud(dataset.paths[1])
+
 reg = Registration()
-tf = reg.register(src, tgt)[0]
+icp_result, global_result = reg.register(src, tgt)
+
+tf = icp_result.transformation
+print(icp_result.inlier_rmse, global_result.inlier_rmse)
 
 src.paint_uniform_color([1, 0.7, 0])  # orange
 tgt.paint_uniform_color([0, 0.65, 1])  # blue
@@ -101,3 +124,17 @@ o3d.visualization.draw_geometries(
 o3d.visualization.draw_geometries(
     [alg_src, tgt], window_name="AFTER", width=800, height=600
 )
+
+# vis = o3d.visualization.Visualizer()
+# vis.create_window(window_name="Registration Result", width=1280, height=720)
+
+# vis.add_geometry(alg_src)
+# vis.add_geometry(tgt)
+
+# # Optional: render options
+# opt = vis.get_render_option()
+# opt.point_size = 2.0
+# opt.background_color = [0.1, 0.1, 0.1]  # dark background
+
+# vis.run()  # blocks until you close the window
+# vis.destroy_window()
