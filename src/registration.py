@@ -1,4 +1,3 @@
-import numpy as np
 import open3d as o3d
 import copy
 from src.global_reg import Registration
@@ -30,8 +29,10 @@ def icp_refinement(source_pc, target_pc, init_guess, threshold=1.0, max_iter=100
     result = o3d.pipelines.registration.registration_icp(source_pc, target_pc, threshold, init_guess, o3d.pipelines.registration.TransformationEstimationPointToPoint(), criteria)
     return result
 
-def Gicp_refinement(source_pc, target_pc, init_guess, threshold):
-    return
+def Gicp_refinement(source_pc, target_pc, init_guess, threshold=1.0, max_iter=100):
+    criteria = o3d.pipelines.registration.ICPConvergenceCriteria(max_iteration=max_iter)
+    result = o3d.pipelines.registration.registration_generalized_icp(source_pc, target_pc, threshold, init_guess, o3d.pipelines.registration.TransformationEstimationForGeneralizedICP(), criteria)
+    return result
 
 def VGicp_refinement(source_pc, target_pc, init_guess, threshold):
     return
@@ -56,16 +57,22 @@ target = preprocess_cloud(tgt, voxel_size=0.5)
 global_result = reg.get_initial_guess(src, tgt)
 init_guess = global_result.transformation
 
-print("Before ICP:")
+print("Before registration:")
 visualise_result(source, target, init_guess)
 before_eval = evaluate_alignment(source, target, init_guess, threshold)
 print(before_eval)
 
+print("After registration:")
+print("===== ICP =====")
 icp_result = icp_refinement(source, target, init_guess, threshold, max_iter)
-print("After ICP:")
 print(icp_result)
-print("Transformation:")
 print(icp_result.transformation)
-after_eval = evaluate_alignment(source, target, icp_result.transformation, threshold)
-print(after_eval)
+print(evaluate_alignment(source, target, icp_result.transformation, threshold))
 visualise_result(source, target, icp_result.transformation, title="ICP refinement")
+
+print("===== G-ICP =====")
+gicp_result = Gicp_refinement(source, target, init_guess, threshold, max_iter)
+print(gicp_result)
+print(gicp_result.transformation)
+print(evaluate_alignment(source, target, gicp_result.transformation, threshold))
+visualise_result(source, target, gicp_result.transformation, title="G-ICP refinement")
