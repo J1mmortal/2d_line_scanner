@@ -75,8 +75,37 @@ class Registration:
             max_correspondence_distance=self.voxel_size * 0.4,
             init=init_transform,
             estimation_method=o3d.pipelines.registration.TransformationEstimationPointToPlane(),
+            criteria=o3d.pipelines.registration.ICPConvergenceCriteria(
+                relative_fitness=1e-6, relative_rmse=1e-6, max_iteration=50
+            ),
         )
         return result
+
+    def gen_icp(self, source, target, init_transform):
+        result = o3d.pipelines.registration.registration_generalized_icp(
+            source,
+            target,
+            max_correspondence_distance=self.voxel_size * 0.4,
+            init=init_transform,
+            estimation_method=o3d.pipelines.registration.TransformationEstimationForGeneralizedICP(),
+            criteria=o3d.pipelines.registration.ICPConvergenceCriteria(
+                relative_fitness=1e-6, relative_rmse=1e-6, max_iteration=50
+            ),
+        )
+        return result
+
+    def get_initial_guess(self, source, target):
+        src_down = self.preprocess(source)
+        tgt_down = self.preprocess(target)
+
+        src_fpfh = self.compute_fpfh(src_down)
+        tgt_fpfh = self.compute_fpfh(tgt_down)
+
+        ransac_result = self.global_registration_ransac(
+            src_down, tgt_down, src_fpfh, tgt_fpfh
+        )
+
+        return ransac_result
 
     def register(self, source, target):
         src_down = self.preprocess(source)
@@ -89,21 +118,10 @@ class Registration:
             src_down, tgt_down, src_fpfh, tgt_fpfh
         )
 
-        # transformation = ransac_result.transformation
-        # fitness = ransac_result.fitness
-        # rmse = ransac_result.inlier_rmse
-
         icp_result = self.refine_icp(source, target, ransac_result.transformation)
+        # icp_result = self.gen_icp(source, target, ransac_result.transformation)
 
         return icp_result, ransac_result
-    
-    def get_initial_guess(self, source, target):
-        src_down = self.preprocess(source)
-        tgt_down = self.preprocess(target)
-        src_fpfh = self.compute_fpfh(src_down)
-        tgt_fpfh = self.compute_fpfh(tgt_down)
-        ransac_result = self.global_registration_ransac(src_down, tgt_down, src_fpfh, tgt_fpfh)
-        return ransac_result
 
 
 dataset = o3d.data.DemoICPPointClouds()
@@ -131,9 +149,9 @@ o3d.visualization.draw_geometries(
     [src, tgt], window_name="BEFORE", width=800, height=600
 )
 
-# o3d.visualization.draw_geometries(
-#     [alg_src, tgt], window_name="AFTER", width=800, height=600
-# )
+o3d.visualization.draw_geometries(
+    [alg_src, tgt], window_name="AFTER", width=800, height=600
+)
 
 # diff = np.asarray(tgt.points) - np.asarray(alg_src.points)
 # print(diff)
