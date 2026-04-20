@@ -96,6 +96,14 @@ class Registration:
         icp_result = self.refine_icp(source, target, ransac_result.transformation)
 
         return icp_result, ransac_result
+    
+    def get_initial_guess(self, source, target):
+        src_down = self.preprocess(source)
+        tgt_down = self.preprocess(target)
+        src_fpfh = self.compute_fpfh(src_down)
+        tgt_fpfh = self.compute_fpfh(tgt_down)
+        ransac_result = self.global_registration_ransac(src_down, tgt_down, src_fpfh, tgt_fpfh)
+        return ransac_result
 
 
 dataset = o3d.data.DemoICPPointClouds()
