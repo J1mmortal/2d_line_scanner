@@ -53,7 +53,6 @@ def visualise_result(source_pc, target_pc, transform, title="Results for unassig
 #### Work flow ####
 source = preprocess_cloud(src, voxel_size=0.5)
 target = preprocess_cloud(tgt, voxel_size=0.5)
-
 global_result = reg.get_initial_guess(src, tgt)
 init_guess = global_result.transformation
 
