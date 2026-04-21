@@ -26,7 +26,7 @@ src.paint_uniform_color([1, 0.7, 0])
 
 # o3d.visualization.draw_geometries([tgt, src], window_name="Block")
 
-reg = Registration()
+reg = Registration(3, 3)
 icp_result, global_result = reg.register(src, tgt)
 
 tf = icp_result.transformation
