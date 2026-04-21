@@ -5,11 +5,41 @@ import copy
 
 class Registration:
     def __init__(self):
-        self.voxel_size = 0.05  # cm
-        self.course_voxel = 0.005
+        # Main settings shared by global and local registration
+        self.voxel_size = 0.05
+        self.coarse_voxel = 0.05
+        self.max_correspondence_distance = self.voxel_size * 0.4
+
+        self.relative_fitness = 1e-6
+        self.relative_rmse = 1e-6
+        self.max_iteration = 50
+
+        self.normal_radius = self.voxel_size * 2
+        self.normal_max_nn = 30
+        self.fpfh_radius = self.voxel_size * 5
+        self.fpfh_max_nn = 100
+        self.ransac_distance_threshold = self.coarse_voxel * 1.5
+        self.ransac_max_iteration = 100_000
+        self.ransac_confidence = 0.999
 
         self.pcd = o3d.geometry.PointCloud()
-        # Why and what magnitude of distance thershold
+
+    def get_icp_criteria(self):
+        return o3d.pipelines.registration.ICPConvergenceCriteria(
+            relative_fitness=self.relative_fitness,
+            relative_rmse=self.relative_rmse,
+            max_iteration=self.max_iteration,
+        )
+
+    def ensure_normals(self, pcd):
+        if not pcd.has_normals():
+            pcd.estimate_normals(
+                o3d.geometry.KDTreeSearchParamHybrid(
+                    radius=self.normal_radius,
+                    max_nn=self.normal_max_nn,
+                )
+            )
+        return pcd
 
     def convert_file(self, file):
         if file is not None:
@@ -19,13 +49,12 @@ class Registration:
             self.pcd.points = mesh.vertices
             self.pcd.normals = mesh.vertex_normals
 
-            # pcd = mesh.sample_points_poisson_disk(number_of_points=50_000) # Use for more uniform sampling
-
     def preprocess(self, pcd):
-        pcd_down = pcd.voxel_down_sample(self.course_voxel)
+        pcd_down = pcd.voxel_down_sample(self.coarse_voxel)
         pcd_down.estimate_normals(
             o3d.geometry.KDTreeSearchParamHybrid(
-                radius=self.course_voxel * 2, max_nn=30
+                radius=self.normal_radius,
+                max_nn=self.normal_max_nn,
             )
         )
         return pcd_down
@@ -37,61 +66,62 @@ class Registration:
         fpfh = o3d.pipelines.registration.compute_fpfh_feature(
             pcd,
             o3d.geometry.KDTreeSearchParamHybrid(
-                radius=self.voxel_size * 5, max_nn=100
+                radius=self.fpfh_radius,
+                max_nn=self.fpfh_max_nn,
             ),
         )
         return fpfh
 
     def global_registration_ransac(self, source, target, source_fpfh, target_fpfh):
-
-        distance_threshold = self.course_voxel * 1.5
-
         result = o3d.pipelines.registration.registration_ransac_based_on_feature_matching(
             source,
             target,
             source_fpfh,
             target_fpfh,
-            mutual_filter=True,  # only keep symmetric matches
-            max_correspondence_distance=distance_threshold,
+            mutual_filter=True,
+            max_correspondence_distance=self.ransac_distance_threshold,
             estimation_method=o3d.pipelines.registration.TransformationEstimationPointToPoint(
                 False
             ),
-            ransac_n=3,  # triplets of correspondences
+            ransac_n=3,
             checkers=[
                 o3d.pipelines.registration.CorrespondenceCheckerBasedOnEdgeLength(0.9),
                 o3d.pipelines.registration.CorrespondenceCheckerBasedOnDistance(
-                    distance_threshold
+                    self.ransac_distance_threshold
                 ),
             ],
             criteria=o3d.pipelines.registration.RANSACConvergenceCriteria(
-                max_iteration=100_000, confidence=0.999
+                max_iteration=self.ransac_max_iteration,
+                confidence=self.ransac_confidence,
             ),
         )
         return result
 
     def refine_icp(self, source, target, init_transform):
+        source = self.ensure_normals(copy.deepcopy(source))
+        target = self.ensure_normals(copy.deepcopy(target))
+
         result = o3d.pipelines.registration.registration_icp(
             source,
             target,
-            max_correspondence_distance=self.voxel_size * 0.4,
+            max_correspondence_distance=self.max_correspondence_distance,
             init=init_transform,
             estimation_method=o3d.pipelines.registration.TransformationEstimationPointToPlane(),
-            criteria=o3d.pipelines.registration.ICPConvergenceCriteria(
-                relative_fitness=1e-6, relative_rmse=1e-6, max_iteration=50
-            ),
+            criteria=self.get_icp_criteria(),
         )
         return result
 
     def gen_icp(self, source, target, init_transform):
+        source = self.ensure_normals(copy.deepcopy(source))
+        target = self.ensure_normals(copy.deepcopy(target))
+
         result = o3d.pipelines.registration.registration_generalized_icp(
             source,
             target,
-            max_correspondence_distance=self.voxel_size * 0.4,
+            max_correspondence_distance=self.max_correspondence_distance,
             init=init_transform,
             estimation_method=o3d.pipelines.registration.TransformationEstimationForGeneralizedICP(),
-            criteria=o3d.pipelines.registration.ICPConvergenceCriteria(
-                relative_fitness=1e-6, relative_rmse=1e-6, max_iteration=50
-            ),
+            criteria=self.get_icp_criteria(),
         )
         return result
 
@@ -130,25 +160,14 @@ class Registration:
         return ransac_result
 
     def register(self, source, target):
-        src_down = self.preprocess(source)
-        tgt_down = self.preprocess(target)
-
-        src_fpfh = self.compute_fpfh(src_down)
-        tgt_fpfh = self.compute_fpfh(tgt_down)
-
-        ransac_result = self.global_registration_ransac(
-            src_down, tgt_down, src_fpfh, tgt_fpfh
-        )
-
+        ransac_result = self.get_initial_guess(source, target)
         icp_result = self.refine_icp(source, target, ransac_result.transformation)
-        # icp_result = self.gen_icp(source, target, ransac_result.transformation)
-
         return icp_result, ransac_result
 
 
-# dataset = o3d.data.DemoICPPointClouds()
-# src = o3d.io.read_point_cloud(dataset.paths[0])
-# tgt = o3d.io.read_point_cloud(dataset.paths[1])
+dataset = o3d.data.DemoICPPointClouds()
+src = o3d.io.read_point_cloud(dataset.paths[0])
+tgt = o3d.io.read_point_cloud(dataset.paths[1])
 
 # # dataset = o3d.data.DemoColoredICPPointClouds()
 # # src = o3d.io.read_point_cloud(dataset.paths[0])
@@ -160,38 +179,16 @@ class Registration:
 # tf = icp_result.transformation
 # print(icp_result.inlier_rmse, global_result.inlier_rmse)
 
-# src.paint_uniform_color([1, 0.7, 0])  # orange
-# tgt.paint_uniform_color([0, 0.65, 1])  # blue
+src.paint_uniform_color([1, 0.7, 0])
+tgt.paint_uniform_color([0, 0.65, 1])
 
 # alg_src = copy.deepcopy(src)
 # alg_src.transform(tf)
 
-# # Show before and after in two windows
-# o3d.visualization.draw_geometries(
-#     [src, tgt], window_name="BEFORE", width=800, height=600
-# )
+o3d.visualization.draw_geometries(
+    [src, tgt], window_name="BEFORE", width=800, height=600
+)
 
-# o3d.visualization.draw_geometries(
-#     [alg_src, tgt], window_name="AFTER", width=800, height=600
-# )
-
-# diff = np.asarray(tgt.points) - np.asarray(alg_src.points)
-# print(diff)
-
-# o3d.visualization.draw_plotly(
-#     [alg_src, tgt], window_name="AFTER", width=800, height=600
-# )
-
-# vis = o3d.visualization.Visualizer()
-# vis.create_window(window_name="Registration Result", width=1280, height=720)
-
-# vis.add_geometry(alg_src)
-# vis.add_geometry(tgt)
-
-# # Optional: render options
-# opt = vis.get_render_option()
-# opt.point_size = 2.0
-# opt.background_color = [0.1, 0.1, 0.1]  # dark background
-
-# vis.run()  # blocks until you close the window
-# vis.destroy_window()
+o3d.visualization.draw_geometries(
+    [alg_src, tgt], window_name="AFTER", width=800, height=600
+)
