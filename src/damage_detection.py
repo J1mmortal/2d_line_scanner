@@ -5,14 +5,26 @@ import copy
 
 
 class DamageDetector:
-    def __init__(self):
-        pass
+    def __init__(
+        self,
+        damage_sigma_threshold=3.0,
+        dbscan_eps=2.0,
+        dbscan_min_points=30,
+        keep_largest_cluster=False,
+    ):
+        self.damage_sigma_threshold = damage_sigma_threshold
+        self.dbscan_eps = dbscan_eps
+        self.dbscan_min_points = dbscan_min_points
+        self.keep_largest_cluster = keep_largest_cluster
 
-    def c2c_distance(self, aligned_source, target):
+    def detect(self, aligned_source, target, noise_floor, noise_std):
         pcd_dist = aligned_source.compute_point_cloud_distance(target)
         distances = np.asarray(pcd_dist)
 
-        return distances, pcd_dist
+        threshold = noise_floor + self.damage_sigma_threshold * noise_std
+        damage_mask = distances > threshold
+
+        return damage_mask, distances, pcd_dist
 
     def estimate_noise(self, distances, percentile=80, N_SIGMA=3):
         bulk_cutoff = np.percentile(distances, percentile)
@@ -24,6 +36,15 @@ class DamageDetector:
         threshold = noise_mean + N_SIGMA * noise_std
 
         return noise_mean, noise_std, threshold
+
+    def compute_bidirectional_c2c(self, aligned_source, target):
+        src_to_tgt = np.asarray(
+            aligned_source.compute_point_cloud_distance(target), dtype=float
+        )
+        tgt_to_src = np.asarray(
+            target.compute_point_cloud_distance(aligned_source), dtype=float
+        )
+        return src_to_tgt, tgt_to_src
 
     def plot_distance_hist(self, distances, percentile=80):
         fig, axes = plt.subplots(1, 2, figsize=(13, 4))
