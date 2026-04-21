@@ -108,9 +108,7 @@ class Registration:
             target,
             max_correspondence_distance=self.max_correspondence_distance,
             init=init_transform,
-            estimation_method=o3d.pipelines.registration.TransformationEstimationPointToPlane(
-                tukey_kernel
-            ),
+            estimation_method=o3d.pipelines.registration.TransformationEstimationPointToPlane(),
             criteria=self.criteria,
         )
         return result
