@@ -1,7 +1,10 @@
 import copy
 import time
 import open3d as o3d
-from src.global_reg import Registration
+import numpy as np
+from global_reg import Registration
+import pygicp
+from types import SimpleNamespace
 
 reg = Registration()
 threshold = reg.max_correspondence_distance
@@ -13,8 +16,8 @@ demo_pcs = o3d.data.DemoICPPointClouds()
 #src = o3d.io.read_point_cloud(demo_pcs.paths[0])
 #tgt = o3d.io.read_point_cloud(demo_pcs.paths[1])
 
-tgt = reg.convert_file("data/Reg_block_2.stl", n_points=50000)
-src = reg.convert_file("data/Reg_block_dented.stl", n_points=50000)
+tgt = reg.convert_file("data/Reg_block_2.STL", n_points=50000)
+src = reg.convert_file("data/Reg_block_dented.STL", n_points=50000)
 
 # #### Initial guess for transformation when global method not working ####
 # init_guess = np.asarray([
@@ -48,6 +51,8 @@ def ensure_normals(pc):
         )
     return pc
 
+def pcd_to_numpy(pc):
+    return np.asarray(pc.points, dtype=np.float64)
 
 def make_icp_criteria(max_iter):
     return o3d.pipelines.registration.ICPConvergenceCriteria(relative_fitness=reg.relative_fitness, relative_rmse=reg.relative_rmse, max_iteration=max_iter)
@@ -71,7 +76,10 @@ def gicp_refinement(source_pc, target_pc, init_guess, threshold=1.0, max_iter=10
     return o3d.pipelines.registration.registration_generalized_icp(source_pc, target_pc, threshold, init_guess, o3d.pipelines.registration.TransformationEstimationForGeneralizedICP(), criteria)
 
 def vgicp_refinement(source_pc, target_pc, init_guess, threshold=1.0, max_iter=100):
-    return None
+    source_np = pcd_to_numpy(source_pc)
+    target_np = pcd_to_numpy(target_pc)
+    transform = pygicp.align_points(target_np, source_np, initial_guess=init_guess, method="VGICP", max_correspondence_distance=threshold, voxel_resolution=reg.coarse_voxel, num_threads=4)
+    return SimpleNamespace(transformation=transform)
 
 def evaluate_alignment(source_pc, target_pc, transform, threshold):
     return o3d.pipelines.registration.evaluate_registration(source_pc, target_pc, threshold, transform)
@@ -172,7 +180,8 @@ def main(show_visuals):
     methods = [
         ("ICP (point-to-point)", icp_refinement),
         ("ICP (point-to-plane)", point_to_plane_refinement),
-        ("G-ICP", gicp_refinement)]
+        ("G-ICP", gicp_refinement),
+        ("VG-ICP", vgicp_refinement)]
     
     benchmark_results = [benchmark_method(name, fn, src, tgt, init_guess, threshold, max_iter) for name, fn in methods]
     ranked_results = rank_results(benchmark_results)
