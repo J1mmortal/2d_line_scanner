@@ -100,12 +100,17 @@ class Registration:
         source = self.ensure_normals(copy.deepcopy(source))
         target = self.ensure_normals(copy.deepcopy(target))
 
+        # Downweights points with large residuals. Should reduce effect of damaged region on registration
+        tukey_kernel = o3d.pipelines.registration.TukeyLoss(k=10)
+
         result = o3d.pipelines.registration.registration_icp(
             source,
             target,
             max_correspondence_distance=self.max_correspondence_distance,
             init=init_transform,
-            estimation_method=o3d.pipelines.registration.TransformationEstimationPointToPlane(),
+            estimation_method=o3d.pipelines.registration.TransformationEstimationPointToPlane(
+                tukey_kernel
+            ),
             criteria=self.criteria,
         )
         return result

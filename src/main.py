@@ -16,7 +16,7 @@ tgt = mesh1.sample_points_poisson_disk(number_of_points=10_000)
 tgt.paint_uniform_color([0, 0.65, 1])
 
 mesh2 = o3d.io.read_triangle_mesh(
-    "C:/Users/fvsch/OneDrive/Desktop/TUDelft/Y3/BEP/Reg_block_2.stl"
+    "C:/Users/fvsch/OneDrive/Desktop/TUDelft/Y3/BEP/Reg_block_dented.stl"
 )
 mesh2.compute_vertex_normals()
 
@@ -30,7 +30,7 @@ reg = Registration(3, 3)
 icp_result, global_result = reg.register(src, tgt)
 
 tf = icp_result.transformation
-print(icp_result.inlier_rmse, global_result.inlier_rmse)
+print(f"ICP RMSE: {icp_result.inlier_rmse}, RANSCAC RMSE: {global_result.inlier_rmse}")
 
 src.paint_uniform_color([1, 0.7, 0])  # orange
 tgt.paint_uniform_color([0, 0.65, 1])  # blue
