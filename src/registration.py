@@ -10,11 +10,11 @@ show_visuals = True
 
 
 demo_pcs = o3d.data.DemoICPPointClouds()
-src = o3d.io.read_point_cloud(demo_pcs.paths[0])
-tgt = o3d.io.read_point_cloud(demo_pcs.paths[1])
+#src = o3d.io.read_point_cloud(demo_pcs.paths[0])
+#tgt = o3d.io.read_point_cloud(demo_pcs.paths[1])
 
-# src = o3d.io.read_point_cloud("reference_scan.ply")
-# tgt = o3d.io.read_point_cloud("dented_scan.ply")
+tgt = reg.convert_file("data/Reg_block_2.stl", n_points=50000)
+src = reg.convert_file("data/Reg_block_dented.stl", n_points=50000)
 
 # #### Initial guess for transformation when global method not working ####
 # init_guess = np.asarray([
@@ -36,7 +36,6 @@ def preprocess_cloud(pc, voxel_size=None):
         )
     )
     return pc
-
 
 def ensure_normals(pc):
     pc = copy.deepcopy(pc)

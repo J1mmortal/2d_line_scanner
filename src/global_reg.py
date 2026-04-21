@@ -40,13 +40,17 @@ class Registration:
             )
         return pcd
 
-    def convert_file(self, file):
+    def convert_file(self, file, n_points=50000):
         if file is not None:
             mesh = o3d.io.read_triangle_mesh(file)
             mesh.compute_vertex_normals()
 
             self.pcd.points = mesh.vertices
             self.pcd.normals = mesh.vertex_normals
+            mesh.compute_vertex_normals()
+            pcd = mesh.sample_points_uniformly(number_of_points=n_points)
+            pcd = self.ensure_normals(pcd)
+        return pcd
 
     def preprocess(self, pcd):
         pcd_down = pcd.voxel_down_sample(self.coarse_voxel)
