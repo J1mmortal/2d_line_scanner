@@ -1,10 +1,14 @@
-import open3d as o3d
 import copy
+import time
+import open3d as o3d
 from src.global_reg import Registration
 
 reg = Registration()
 threshold = reg.max_correspondence_distance
 max_iter = reg.max_iteration
+show_visuals = True
+
+
 demo_pcs = o3d.data.DemoICPPointClouds()
 src = o3d.io.read_point_cloud(demo_pcs.paths[0])
 tgt = o3d.io.read_point_cloud(demo_pcs.paths[1])
@@ -20,6 +24,7 @@ tgt = o3d.io.read_point_cloud(demo_pcs.paths[1])
 #     [0.0, 0.0, 0.0, 1.0]
 # ])
 
+
 def preprocess_cloud(pc, voxel_size=None):
     pc = copy.deepcopy(pc)
     if voxel_size is not None:
@@ -27,10 +32,11 @@ def preprocess_cloud(pc, voxel_size=None):
     pc.estimate_normals(
         o3d.geometry.KDTreeSearchParamHybrid(
             radius=reg.normal_radius,
-            max_nn=reg.normal_max_nn
+            max_nn=reg.normal_max_nn,
         )
     )
     return pc
+
 
 def ensure_normals(pc):
     pc = copy.deepcopy(pc)
@@ -38,129 +44,156 @@ def ensure_normals(pc):
         pc.estimate_normals(
             o3d.geometry.KDTreeSearchParamHybrid(
                 radius=reg.normal_radius,
-                max_nn=reg.normal_max_nn
+                max_nn=reg.normal_max_nn,
             )
         )
     return pc
 
+
+def make_icp_criteria(max_iter):
+    return o3d.pipelines.registration.ICPConvergenceCriteria(relative_fitness=reg.relative_fitness, relative_rmse=reg.relative_rmse, max_iteration=max_iter)
+
 def icp_refinement(source_pc, target_pc, init_guess, threshold=1.0, max_iter=100):
     source_pc = ensure_normals(source_pc)
     target_pc = ensure_normals(target_pc)
-
-    criteria = o3d.pipelines.registration.ICPConvergenceCriteria(
-        relative_fitness=reg.relative_fitness,
-        relative_rmse=reg.relative_rmse,
-        max_iteration=max_iter
-    )
-
-    result = o3d.pipelines.registration.registration_icp(
-        source_pc,
-        target_pc,
-        threshold,
-        init_guess,
-        o3d.pipelines.registration.TransformationEstimationPointToPoint(),
-        criteria
-    )
-    return result
+    criteria = make_icp_criteria(max_iter)
+    return o3d.pipelines.registration.registration_icp(source_pc, target_pc, threshold, init_guess, o3d.pipelines.registration.TransformationEstimationPointToPoint(), criteria)
 
 def point_to_plane_refinement(source_pc, target_pc, init_guess, threshold=1.0, max_iter=100):
     source_pc = ensure_normals(source_pc)
     target_pc = ensure_normals(target_pc)
+    criteria = make_icp_criteria(max_iter)
+    return o3d.pipelines.registration.registration_icp(source_pc, target_pc, threshold, init_guess, o3d.pipelines.registration.TransformationEstimationPointToPlane(), criteria)
 
-    criteria = o3d.pipelines.registration.ICPConvergenceCriteria(
-        relative_fitness=reg.relative_fitness,
-        relative_rmse=reg.relative_rmse,
-        max_iteration=max_iter
-    )
-
-    result = o3d.pipelines.registration.registration_icp(
-        source_pc,
-        target_pc,
-        threshold,
-        init_guess,
-        o3d.pipelines.registration.TransformationEstimationPointToPlane(),
-        criteria
-    )
-    return result
-
-def Gicp_refinement(source_pc, target_pc, init_guess, threshold=1.0, max_iter=100):
+def gicp_refinement(source_pc, target_pc, init_guess, threshold=1.0, max_iter=100):
     source_pc = ensure_normals(source_pc)
     target_pc = ensure_normals(target_pc)
+    criteria = make_icp_criteria(max_iter)
+    return o3d.pipelines.registration.registration_generalized_icp(source_pc, target_pc, threshold, init_guess, o3d.pipelines.registration.TransformationEstimationForGeneralizedICP(), criteria)
 
-    criteria = o3d.pipelines.registration.ICPConvergenceCriteria(
-        relative_fitness=reg.relative_fitness,
-        relative_rmse=reg.relative_rmse,
-        max_iteration=max_iter
-    )
-
-    result = o3d.pipelines.registration.registration_generalized_icp(
-        source_pc,
-        target_pc,
-        threshold,
-        init_guess,
-        o3d.pipelines.registration.TransformationEstimationForGeneralizedICP(),
-        criteria
-    )
-    return result
-
-def VGicp_refinement(source_pc, target_pc, init_guess, threshold):
-    return
+def vgicp_refinement(source_pc, target_pc, init_guess, threshold=1.0, max_iter=100):
+    return None
 
 def evaluate_alignment(source_pc, target_pc, transform, threshold):
-    return o3d.pipelines.registration.evaluate_registration(
-        source_pc, target_pc, threshold, transform
-    )
+    return o3d.pipelines.registration.evaluate_registration(source_pc, target_pc, threshold, transform)
 
 def visualise_result(source_pc, target_pc, transform, title="Results for unassigned method"):
     source_temp = copy.deepcopy(source_pc)
     target_temp = copy.deepcopy(target_pc)
-
     source_temp.paint_uniform_color([1, 0.2, 0])
     target_temp.paint_uniform_color([0, 0.65, 0.93])
-
     source_temp.transform(transform)
-
     o3d.visualization.draw_geometries(
         [source_temp, target_temp],
         window_name=title,
         width=1000,
-        height=800
-    )
-    return
+        height=800)
 
+def benchmark_method(name, method_fn, source_pc, target_pc, init_guess, threshold, max_iter):
+    start = time.perf_counter()
+    result = method_fn(source_pc, target_pc, init_guess, threshold, max_iter)
+    runtime_s = time.perf_counter() - start
+    if result is None:
+        return {
+            "method": name,
+            "success": False,
+            "fitness": None,
+            "inlier_rmse": None,
+            "runtime_s": runtime_s,
+            "threshold": threshold,
+            "max_iter": max_iter,
+            "relative_fitness": reg.relative_fitness,
+            "relative_rmse": reg.relative_rmse,
+            "transformation": None,
+            "result": None,
+            "evaluation": None,
+            "notes": "Method not implemented."}
 
-#### Work flow ####
-# Keep preprocessed versions available for future experiments,
-# but refinement below is done on the full clouds for consistency.
-source = preprocess_cloud(src, voxel_size=reg.coarse_voxel)
-target = preprocess_cloud(tgt, voxel_size=reg.coarse_voxel)
+    evaluation = evaluate_alignment(source_pc, target_pc, result.transformation, threshold)
+    return {
+        "method": name,
+        "success": True,
+        "fitness": evaluation.fitness,
+        "inlier_rmse": evaluation.inlier_rmse,
+        "runtime_s": runtime_s,
+        "threshold": threshold,
+        "max_iter": max_iter,
+        "relative_fitness": reg.relative_fitness,
+        "relative_rmse": reg.relative_rmse,
+        "transformation": result.transformation,
+        "result": result,
+        "evaluation": evaluation,
+        "notes": ""}
 
-global_result = reg.get_initial_guess(src, tgt)
-init_guess = global_result.transformation
+def rank_results(results):
+    successful = [r for r in results if r["success"]]
+    failed = [r for r in results if not r["success"]]
+    successful.sort(key=lambda r: (-r["fitness"], r["inlier_rmse"], r["runtime_s"]))
+    return successful + failed
 
-print("Before registration:")
-visualise_result(src, tgt, init_guess, title="Initial guess")
-before_eval = evaluate_alignment(src, tgt, init_guess, threshold)
-print(before_eval)
+def print_initial_evaluation(source_pc, target_pc, init_guess, threshold, show_visuals=False):
+    print("Before registration:")
+    initial_eval = evaluate_alignment(source_pc, target_pc, init_guess, threshold)
+    print(initial_eval)
+    if show_visuals:
+        visualise_result(source_pc, target_pc, init_guess, title="Initial guess")
+    return initial_eval
 
-print("After registration:")
-print("===== ICP (point-to-point) =====")
-icp_result = icp_refinement(src, tgt, init_guess, threshold, max_iter)
-print(icp_result)
-print(icp_result.transformation)
-print(evaluate_alignment(src, tgt, icp_result.transformation, threshold))
-visualise_result(src, tgt, icp_result.transformation, title="ICP refinement")
+def print_result_summary(results):
+    print("===== Ranked benchmark summary =====")
+    header = (f"{'Rank':<6}{'Method':<24}{'Fitness':<14}"
+              f"{'Inlier RMSE':<16}{'Runtime (s)':<14}{'Threshold':<12}{'Max iter':<10}")
+    print(header)
+    print("-" * len(header))
 
-print("===== ICP (point-to-plane) =====")
-plane_result = point_to_plane_refinement(src, tgt, init_guess, threshold, max_iter)
-print(plane_result)
-print(plane_result.transformation)
-print(evaluate_alignment(src, tgt, plane_result.transformation, threshold))
-visualise_result(src, tgt, plane_result.transformation, title="Point-to-plane refinement")
+    for idx, item in enumerate(results, start=1):
+        fitness = f"{item['fitness']:.6f}" if item["fitness"] is not None else "N/A"
+        rmse = f"{item['inlier_rmse']:.6f}" if item["inlier_rmse"] is not None else "N/A"
+        runtime_s = f"{item['runtime_s']:.6f}"
+        print(
+            f"{idx:<6}{item['method']:<24}{fitness:<14}"
+            f"{rmse:<16}{runtime_s:<14}{item['threshold']:<12.4f}{item['max_iter']:<10}")
+        if item["notes"]:
+            print(f"      Notes: {item['notes']}")
 
-print("===== G-ICP =====")
-gicp_result = Gicp_refinement(src, tgt, init_guess, threshold, max_iter)
-print(gicp_result)
-print(gicp_result.transformation)
-print(evaluate_alignment(src, tgt, gicp_result.transformation, threshold))
-visualise_result(src, tgt, gicp_result.transformation, title="G-ICP refinement")
+def visualise_ranked_results(results, source_pc, target_pc, show_visuals=False):
+    if not show_visuals:
+        return
+    for item in results:
+        if item["success"] and item["transformation"] is not None:
+            visualise_result(source_pc, target_pc, item["transformation"], title=item["method"])
+
+def main(show_visuals):
+    preprocess_cloud(src, voxel_size=reg.coarse_voxel)
+    preprocess_cloud(tgt, voxel_size=reg.coarse_voxel)
+    global_result = reg.get_initial_guess(src, tgt)
+    init_guess = global_result.transformation
+    initial_eval = print_initial_evaluation(src, tgt, init_guess, threshold, show_visuals=show_visuals)
+    
+    methods = [
+        ("ICP (point-to-point)", icp_refinement),
+        ("ICP (point-to-plane)", point_to_plane_refinement),
+        ("G-ICP", gicp_refinement)]
+    
+    benchmark_results = [benchmark_method(name, fn, src, tgt, init_guess, threshold, max_iter) for name, fn in methods]
+    ranked_results = rank_results(benchmark_results)
+    print("After registration:")
+    for item in ranked_results:
+        print(f"\n\n===== {item['method']} =====")
+        if item["success"]:
+            print(item["result"])
+            print(item["transformation"])
+            print(item["evaluation"])
+        else:
+            print(item["notes"])
+    
+    print_result_summary(ranked_results)
+    visualise_ranked_results(ranked_results, src, tgt, show_visuals=show_visuals)
+    return {
+        "initial_evaluation": initial_eval,
+        "initial_guess": init_guess,
+        "results": benchmark_results,
+        "ranked_results": ranked_results}
+
+if __name__ == "__main__":
+    summary = main(show_visuals=show_visuals)
