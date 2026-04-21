@@ -123,6 +123,27 @@ class Registration:
         )
         return result
 
+    def multi_scale_icp(self, source, target, init_transform):
+        voxel_sizes = o3d.utility.DoubleVector([0.1, 0.05, 0.025])
+        max_iter = o3d.utility.IntVector([50, 30, 14])
+
+        criteria_list = [
+            o3d.t.pipelines.registration.ICPConvergenceCriteria(max_iteration=it)
+            for it in max_iter
+        ]
+
+        result = o3d.t.pipelines.registration.multi_scale_icp(
+            source,
+            target,
+            voxel_sizes,
+            criteria_list,
+            max_correspondence_distances=o3d.utility.DoubleVector([0.3, 0.15, 0.075]),
+            init_source_to_target=init_transform,
+            estimation=o3d.t.pipelines.registration.TransformationEstimationPointToPlane(),
+        )
+
+        return result
+
     def get_initial_guess(self, source, target):
         src_down = self.preprocess(source)
         tgt_down = self.preprocess(target)
