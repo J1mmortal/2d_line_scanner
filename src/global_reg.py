@@ -4,10 +4,10 @@ import copy
 
 
 class Registration:
-    def __init__(self):
+    def __init__(self, voxel_size=0.05, course_voxel=0.05):
         # Main settings shared by global and local registration
-        self.voxel_size = 0.05
-        self.coarse_voxel = 0.05
+        self.voxel_size = voxel_size
+        self.coarse_voxel = course_voxel
         self.max_correspondence_distance = self.voxel_size * 0.4
 
         self.relative_fitness = 1e-6
@@ -24,8 +24,7 @@ class Registration:
 
         self.pcd = o3d.geometry.PointCloud()
 
-    def get_icp_criteria(self):
-        return o3d.pipelines.registration.ICPConvergenceCriteria(
+        self.criteria = o3d.pipelines.registration.ICPConvergenceCriteria(
             relative_fitness=self.relative_fitness,
             relative_rmse=self.relative_rmse,
             max_iteration=self.max_iteration,
