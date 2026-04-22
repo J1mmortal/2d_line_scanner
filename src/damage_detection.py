@@ -27,11 +27,10 @@ class DamageDetector:
 
         return damage_mask, distances, pcd_dist
 
-    def cluster(self, aligned_source, damage_mask, distances, eps=2, min_samples=10):
+    def cluster(self, aligned_source, damage_mask, eps=2, min_samples=10):
         xyz = np.asarray(aligned_source.points)
 
         xyz_damage = xyz[damage_mask]
-        # dist_damge = distances[damage_mask]
 
         db = DBSCAN(
             eps=eps,
@@ -50,7 +49,6 @@ class DamageDetector:
     def color_point_cloud_by_labels(
         self, aligned_source, labels, noise_color=(0.5, 0.5, 0.5), cmap_name="tab20"
     ):
-        print(aligned_source, type(aligned_source))
         xyz = np.asarray(aligned_source.points)
         labels = np.asarray(labels)
 
