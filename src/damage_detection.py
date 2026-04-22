@@ -47,6 +47,33 @@ class DamageDetector:
 
         return full_labels
 
+    def color_point_cloud_by_labels(
+        self, aligned_source, labels, noise_color=(0.5, 0.5, 0.5), cmap_name="tab20"
+    ):
+        print(aligned_source, type(aligned_source))
+        xyz = np.asarray(aligned_source.points)
+        labels = np.asarray(labels)
+
+        pcd = o3d.geometry.PointCloud()
+        pcd.points = o3d.utility.Vector3dVector(xyz)
+
+        colors = np.zeros((len(labels), 3), dtype=float)
+        unique_labels = np.unique(labels[labels >= 0])
+
+        if len(unique_labels) > 0:
+            cmap = plt.get_cmap(cmap_name)
+            label_to_color = {
+                lab: cmap(i / max(len(unique_labels) - 1, 1))[:3]
+                for i, lab in enumerate(unique_labels)
+            }
+            for lab, col in label_to_color.items():
+                colors[labels == lab] = col
+
+        colors[labels == -1] = noise_color
+        pcd.colors = o3d.utility.Vector3dVector(colors)
+
+        o3d.visualization.draw_geometries([pcd])
+
     def estimate_noise(self, distances, percentile=80):
         bulk_cutoff = np.percentile(distances, percentile)
         bulk_dists = distances[distances < bulk_cutoff]
