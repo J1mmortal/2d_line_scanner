@@ -300,8 +300,19 @@ def main(show_visuals):
             else:
                 print(item["notes"])
         return ranked
-
+    
     ranked_results = timed_step("print local method details", _print_local_results)
+    
+    def _print_timing_summary():
+        print("\n===== Timing summary (top 10 by duration) =====")
+        sorted_steps = sorted(timings, key=lambda d: d["duration"], reverse=True)
+        top = sorted_steps[:10]
+        for i, entry in enumerate(top, 1):
+            print(f"{i:2d}. {entry['name']:<40} {entry['duration']:.3f} s")
+        total = sum(entry["duration"] for entry in sorted_steps)
+        print(f"\nTotal measured time (sum of steps): {total:.3f} s")
+
+    timed_step("print timing summary", _print_timing_summary)
     timed_step("print benchmark summary", print_result_summary, ranked_results)
     
     total_runtime = time.perf_counter() - total_start
