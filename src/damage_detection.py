@@ -27,14 +27,34 @@ class DamageDetector:
 
         return damage_mask, distances, pcd_dist
 
-    def estimate_noise(self, distances, percentile=80, N_SIGMA=3):
+    def cluster(self, aligned_source, damage_mask, distances, eps=2, min_samples=10):
+        xyz = np.asarray(aligned_source.points)
+
+        xyz_damage = xyz[damage_mask]
+        # dist_damge = distances[damage_mask]
+
+        db = DBSCAN(
+            eps=eps,
+            min_samples=min_samples,
+            metric="euclidean",
+            n_jobs=-1,
+        )
+
+        labels = db.fit_predict(xyz_damage)
+
+        full_labels = np.full(len(xyz), -1, dtype=int)
+        full_labels[damage_mask] = labels
+
+        return full_labels
+
+    def estimate_noise(self, distances, percentile=80):
         bulk_cutoff = np.percentile(distances, percentile)
         bulk_dists = distances[distances < bulk_cutoff]
 
         noise_mean = float(bulk_dists.mean())
         noise_std = float(bulk_dists.std())
 
-        threshold = noise_mean + N_SIGMA * noise_std
+        threshold = noise_mean + self.damage_sigma_threshold * noise_std
 
         return noise_mean, noise_std, threshold
 
@@ -106,6 +126,3 @@ class DamageDetector:
         o3d.visualization.draw_geometries(
             [vis_pcd], window_name="C2C Damage Heatmap", width=1200, height=800
         )
-
-
-det = DamageDetector()
