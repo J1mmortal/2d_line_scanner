@@ -2,6 +2,7 @@ import open3d as o3d
 import numpy as np
 import matplotlib.pyplot as plt
 import copy
+from sklearn.cluster import DBSCAN
 
 
 class DamageDetector:
@@ -105,3 +106,6 @@ class DamageDetector:
         o3d.visualization.draw_geometries(
             [vis_pcd], window_name="C2C Damage Heatmap", width=1200, height=800
         )
+
+
+det = DamageDetector()

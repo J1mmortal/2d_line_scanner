@@ -44,9 +44,9 @@ alg_src.transform(tf)
 #     [src, tgt], window_name="BEFORE", width=800, height=600
 # )
 
-o3d.visualization.draw_geometries(
-    [alg_src, tgt], window_name="AFTER", width=800, height=600
-)
+# o3d.visualization.draw_geometries(
+#     [alg_src, tgt], window_name="AFTER", width=800, height=600
+# )
 
 
 damage_pcd = alg_src.compute_point_cloud_distance(tgt)
@@ -89,7 +89,7 @@ n_damaged = damage_mask.sum()
 aligned_pts = np.asarray(alg_src.points)
 
 # Filter to the side panel (Y ≈ 150 mm) for the clearest view
-side_mask = np.abs(aligned_pts[:, 0]) > 30
+side_mask = np.abs(aligned_pts[:, 0])
 y_side = aligned_pts[side_mask, 1]
 z_side = aligned_pts[side_mask, 2]
 d_side = distances[side_mask]
@@ -130,15 +130,15 @@ plt.tight_layout()
 # plt.savefig('/tmp/damage_map.png', dpi=150, bbox_inches='tight')
 plt.show()
 
-# colors = np.where(
-#     damage_mask[:, None],  # broadcast over RGB
-#     [1.0, 0.1, 0.1],  # red = damaged
-#     [0.75, 0.75, 0.75],  # grey = undamaged
-# )
+colors = np.where(
+    damage_mask[:, None],  # broadcast over RGB
+    [1.0, 0.1, 0.1],  # red = damaged
+    [0.75, 0.75, 0.75],  # grey = undamaged
+)
 
-# vis_pcd = copy.deepcopy(alg_src)
-# vis_pcd.colors = o3d.utility.Vector3dVector(colors)
+vis_pcd = copy.deepcopy(alg_src)
+vis_pcd.colors = o3d.utility.Vector3dVector(colors)
 
-# o3d.visualization.draw_geometries(
-#     [vis_pcd], window_name="Binary Damage Mask 3D", width=1200, height=800
-# )
+o3d.visualization.draw_geometries(
+    [vis_pcd], window_name="Binary Damage Mask 3D", width=1200, height=800
+)
