@@ -49,21 +49,13 @@ def preprocess_cloud(pc, voxel_size=None):
     pc = copy.deepcopy(pc)
     if voxel_size is not None:
         pc = pc.voxel_down_sample(voxel_size)
-    pc.estimate_normals(
-        o3d.geometry.KDTreeSearchParamHybrid(
-            radius=reg.normal_radius,
-            max_nn=reg.normal_max_nn))
+    pc.estimate_normals(o3d.geometry.KDTreeSearchParamHybrid(radius=reg.normal_radius, max_nn=reg.normal_max_nn))
     return pc
 
 def ensure_normals(pc):
     pc = copy.deepcopy(pc)
     if not pc.has_normals():
-        pc.estimate_normals(
-            o3d.geometry.KDTreeSearchParamHybrid(
-                radius=reg.normal_radius,
-                max_nn=reg.normal_max_nn,
-            )
-        )
+        pc.estimate_normals(o3d.geometry.KDTreeSearchParamHybrid(radius=reg.normal_radius, max_nn=reg.normal_max_nn))
     return pc
 
 def pcd_to_numpy(pc):
@@ -81,7 +73,7 @@ def dare_refinement(source_pc, target_pc, init_guess, num_iters=30, K=300, gamma
     Q = psreg.get_default_cluster_precisions(Vs, X)
     beta = psreg.get_default_beta(Q, gamma)
 
-    # source starts from global guess, target fixed at identity
+    # source starts from initial guess, target fixed at identity
     R_src = init_guess[:3, :3].copy()
     t_src = init_guess[:3, 3].copy()
     R_tgt = np.eye(3)
@@ -89,29 +81,18 @@ def dare_refinement(source_pc, target_pc, init_guess, num_iters=30, K=300, gamma
     Ps = [(R_src, t_src), (R_tgt, t_tgt)]
     
     method = psreg.PSREG(beta, epsilon, pk, X, Q, [], debug=False)
-    TVs, X_model = method.register_points(Vs, features, num_iters,
-        Ps,
-        show_progress=True,
-        observation_weight_function=observation_weights.empirical_estimate_kdtree,
-        ow_args=num_neighbors
-    )
+    TVs, X_model = method.register_points(Vs, features, num_iters, Ps, show_progress=True, observation_weight_function=observation_weights.empirical_estimate_kdtree, ow_args=num_neighbors)
+    
     # print("type(TVs[0]) =", type(TVs[0]), "shape =", np.asarray(TVs[0]).shape)
     # print("Ps[0] type:", type(Ps[0]), "len:", len(Ps[0]))
     # print("Ps[0][0] shape:", np.asarray(Ps[0][0]).shape)
     # print("Ps[0][1] shape:", np.asarray(Ps[0][1]).shape)
-    # TVs contains the refined transforms for each point set
+
     R_refined, t_refined = Ps[0]
     T_source_refined = np.eye(4)
     T_source_refined[:3, :3] = R_refined
     T_source_refined[:3, 3] = t_refined
-    
-    return SimpleNamespace(
-        transformation=T_source_refined,
-        result=TVs,
-        model=X_model,
-        fitness=None,
-        inlier_rmse=None
-    )
+    return SimpleNamespace(transformation=T_source_refined, result=TVs, model=X_model, fitness=None, inlier_rmse=None)
 
 def icp_refinement(source_pc, target_pc, init_guess, threshold=1.0, max_iter=100):
     source_pc = ensure_normals(source_pc)
@@ -227,22 +208,13 @@ def visualise_ranked_results(results, source_pc, target_pc, show_visuals=False):
 def main(show_visuals):
     global timings
     total_start = time.perf_counter()
-    src_proc = timed_step(
-        "preprocess src (coarse)",
-        preprocess_cloud,
-        src,
-        voxel_size=reg.coarse_voxel,
-    )
-    tgt_proc = timed_step(
-        "preprocess tgt (coarse)",
-        preprocess_cloud,
-        tgt,
-        voxel_size=reg.coarse_voxel,
-    )
     
+    src_proc = timed_step("preprocess src (coarse)", preprocess_cloud, src, voxel_size=reg.coarse_voxel)   
     print("src points:", np.asarray(src.points).shape)
-    print("tgt points:", np.asarray(tgt.points).shape)
     print("src points (processed):", np.asarray(src_proc.points).shape)
+    
+    tgt_proc = timed_step("preprocess tgt (coarse)", preprocess_cloud, tgt, voxel_size=reg.coarse_voxel)
+    print("tgt points:", np.asarray(tgt.points).shape)
     print("tgt points (processed):", np.asarray(tgt_proc.points).shape)
 
     '''
@@ -269,9 +241,7 @@ def main(show_visuals):
     r4 = vgicp_refinement(src_proc, tgt_proc, init_guess, threshold, max_iter)
     print("Done:", r4.transformation)
     '''
-    global_result = timed_step("global initial guess (RANSAC+FPFH)",
-                           reg.get_initial_guess,
-                           src, tgt)
+    global_result = timed_step("global initial guess (RANSAC+FPFH)", reg.get_initial_guess, src, tgt)
     init_guess = global_result.transformation
     initial_eval = timed_step("evaluate + visualise global result", print_initial_evaluation, src, tgt, init_guess, threshold, show_visuals=show_visuals)
     
@@ -283,7 +253,6 @@ def main(show_visuals):
         ("ICP (point-to-point)", icp_refinement),
         ("ICP (point-to-plane)", point_to_plane_refinement),
         ("G-ICP", gicp_refinement)]
-    
     def _run_benchmarks():
         return [benchmark_method(name, fn, src, tgt, guess_refinement, threshold, max_iter) for name, fn in methods]
     benchmark_results = timed_step("all local methods (benchmarks)", _run_benchmarks)
@@ -300,7 +269,6 @@ def main(show_visuals):
             else:
                 print(item["notes"])
         return ranked
-    
     ranked_results = timed_step("print local method details", _print_local_results)
     
     def _print_timing_summary():
@@ -314,11 +282,9 @@ def main(show_visuals):
 
     timed_step("print timing summary", _print_timing_summary)
     timed_step("print benchmark summary", print_result_summary, ranked_results)
-    
+
     total_runtime = time.perf_counter() - total_start
     print(f"\n===== TOTAL wall clock time =====\n{total_runtime:.3f} s")
-    total_runtime = time.perf_counter() - total_start
-
     visualise_ranked_results(ranked_results, src, tgt, show_visuals=show_visuals)
 
     return {
