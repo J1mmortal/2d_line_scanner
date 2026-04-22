@@ -23,8 +23,8 @@ demo_pcs = o3d.data.DemoICPPointClouds()
 src = o3d.io.read_point_cloud(demo_pcs.paths[0])
 tgt = o3d.io.read_point_cloud(demo_pcs.paths[1])
 
-#tgt = reg.convert_file_data("data/Reg_block_2.STL", n_points=50000)
-#src = reg.convert_file_data("data/Reg_block_dented.STL", n_points=50000)
+# tgt = reg.convert_file_data("data/Reg_block_2.STL", n_points=50000)
+# src = reg.convert_file_data("data/Reg_block_dented.STL", n_points=50000)
 
 # #### Initial guess for transformation when global method not working ####
 # init_guess = np.asarray([
@@ -34,6 +34,16 @@ tgt = o3d.io.read_point_cloud(demo_pcs.paths[1])
 #     [0.0, 0.0, 0.0, 1.0]
 # ])
 
+timings = []
+
+def timed_step(name, fn, *args, **kwargs):
+    """Run fn(*args, **kwargs), measure time, log and print it."""
+    start = time.perf_counter()
+    result = fn(*args, **kwargs)
+    duration = time.perf_counter() - start
+    timings.append({"name": name, "duration": duration})
+    print(f"[TIMING] {name} took {duration:.3f} s")
+    return result
 
 def preprocess_cloud(pc, voxel_size=None):
     pc = copy.deepcopy(pc)
@@ -215,12 +225,25 @@ def visualise_ranked_results(results, source_pc, target_pc, show_visuals=False):
             visualise_result(source_pc, target_pc, item["transformation"], title=item["method"])
 
 def main(show_visuals):
-    src_proc = preprocess_cloud(src, voxel_size=reg.coarse_voxel)
-    tgt_proc = preprocess_cloud(tgt, voxel_size=reg.coarse_voxel)
-    print("src points (processed):", np.asarray(src_proc.points).shape)
-    print("tgt points (processed):", np.asarray(tgt_proc.points).shape)
+    global timings
+    total_start = time.perf_counter()
+    src_proc = timed_step(
+        "preprocess src (coarse)",
+        preprocess_cloud,
+        src,
+        voxel_size=reg.coarse_voxel,
+    )
+    tgt_proc = timed_step(
+        "preprocess tgt (coarse)",
+        preprocess_cloud,
+        tgt,
+        voxel_size=reg.coarse_voxel,
+    )
+    
     print("src points:", np.asarray(src.points).shape)
     print("tgt points:", np.asarray(tgt.points).shape)
+    print("src points (processed):", np.asarray(src_proc.points).shape)
+    print("tgt points (processed):", np.asarray(tgt_proc.points).shape)
 
     '''
     print("src points:", np.asarray(src_proc.points).shape)
@@ -246,38 +269,56 @@ def main(show_visuals):
     r4 = vgicp_refinement(src_proc, tgt_proc, init_guess, threshold, max_iter)
     print("Done:", r4.transformation)
     '''
-    global_result = reg.get_initial_guess(src, tgt)
+    global_result = timed_step("global initial guess (RANSAC+FPFH)",
+                           reg.get_initial_guess,
+                           src, tgt)
     init_guess = global_result.transformation
-    initial_eval = print_initial_evaluation(src, tgt, init_guess, threshold, show_visuals=show_visuals)
+    initial_eval = timed_step("evaluate + visualise global result", print_initial_evaluation, src, tgt, init_guess, threshold, show_visuals=show_visuals)
     
-    dare_result = dare_refinement(src, tgt, init_guess, num_iters=30, K=300)
+    dare_result = timed_step("DARE refinement", dare_refinement, src, tgt, init_guess, num_iters=30, K=300)
     guess_refinement = dare_result.transformation
-    dare_eval = print_dare_evaluation(src, tgt, guess_refinement, threshold, show_visuals=show_visuals)
-    
+    dare_eval = timed_step("evaluate + visualise DARE result", print_dare_evaluation, src, tgt, guess_refinement, threshold, show_visuals=show_visuals)    
+
     methods = [
         ("ICP (point-to-point)", icp_refinement),
         ("ICP (point-to-plane)", point_to_plane_refinement),
         ("G-ICP", gicp_refinement)]
     
-    benchmark_results = [benchmark_method(name, fn, src, tgt, init_guess, threshold, max_iter) for name, fn in methods]
+    def _run_benchmarks():
+        return [benchmark_method(name, fn, src, tgt, guess_refinement, threshold, max_iter) for name, fn in methods]
+    benchmark_results = timed_step("all local methods (benchmarks)", _run_benchmarks)
     ranked_results = rank_results(benchmark_results)
-    print("After local registration:")
-    for item in ranked_results:
-        print(f"\n\n===== {item['method']} =====")
-        if item["success"]:
-            print(item["result"])
-            print(item["transformation"])
-            print(item["evaluation"])
-        else:
-            print(item["notes"])
+    def _print_local_results():
+        ranked = rank_results(benchmark_results)
+        print("After local registration:")
+        for item in ranked:
+            print(f"\n\n===== {item['method']} =====")
+            if item["success"]:
+                print(item["result"])
+                print(item["transformation"])
+                print(item["evaluation"])
+            else:
+                print(item["notes"])
+        return ranked
+
+    ranked_results = timed_step("print local method details", _print_local_results)
+    timed_step("print benchmark summary", print_result_summary, ranked_results)
     
-    print_result_summary(ranked_results)
+    total_runtime = time.perf_counter() - total_start
+    print(f"\n===== TOTAL wall clock time =====\n{total_runtime:.3f} s")
+    total_runtime = time.perf_counter() - total_start
+
     visualise_ranked_results(ranked_results, src, tgt, show_visuals=show_visuals)
+
     return {
         "initial_evaluation": initial_eval,
         "initial_guess": init_guess,
+        "dare_evaluation": dare_eval,
+        "dare_guess": guess_refinement,
         "results": benchmark_results,
-        "ranked_results": ranked_results}
+        "ranked_results": ranked_results,
+        "timings": timings,
+        "total_runtime": total_runtime}
 
 if __name__ == "__main__":
     summary = main(show_visuals=show_visuals)
