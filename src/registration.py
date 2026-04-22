@@ -2,9 +2,16 @@ import copy
 import time
 import open3d as o3d
 import numpy as np
-from global_reg import Registration
-import pygicp
+import sys
+from pathlib import Path
 from types import SimpleNamespace
+
+DARE_repo = Path("/home/jim/dare/DARE")
+sys.path.insert(0, str(DARE_repo))
+from start import psreg
+from start import observation_weights
+
+from global_reg import Registration
 
 reg = Registration()
 threshold = reg.max_correspondence_distance
@@ -13,11 +20,11 @@ show_visuals = True
 
 
 demo_pcs = o3d.data.DemoICPPointClouds()
-#src = o3d.io.read_point_cloud(demo_pcs.paths[0])
-#tgt = o3d.io.read_point_cloud(demo_pcs.paths[1])
+src = o3d.io.read_point_cloud(demo_pcs.paths[0])
+tgt = o3d.io.read_point_cloud(demo_pcs.paths[1])
 
-tgt = reg.convert_file("data/Reg_block_2.STL", n_points=50000)
-src = reg.convert_file("data/Reg_block_dented.STL", n_points=50000)
+#tgt = reg.convert_file_data("data/Reg_block_2.STL", n_points=50000)
+#src = reg.convert_file_data("data/Reg_block_dented.STL", n_points=50000)
 
 # #### Initial guess for transformation when global method not working ####
 # init_guess = np.asarray([
@@ -35,9 +42,7 @@ def preprocess_cloud(pc, voxel_size=None):
     pc.estimate_normals(
         o3d.geometry.KDTreeSearchParamHybrid(
             radius=reg.normal_radius,
-            max_nn=reg.normal_max_nn,
-        )
-    )
+            max_nn=reg.normal_max_nn))
     return pc
 
 def ensure_normals(pc):
@@ -52,10 +57,51 @@ def ensure_normals(pc):
     return pc
 
 def pcd_to_numpy(pc):
-    return np.asarray(pc.points, dtype=np.float64)
+    return np.asarray(pc.points, dtype=np.float64).T
 
 def make_icp_criteria(max_iter):
     return o3d.pipelines.registration.ICPConvergenceCriteria(relative_fitness=reg.relative_fitness, relative_rmse=reg.relative_rmse, max_iteration=max_iter)
+
+def dare_refinement(source_pc, target_pc, init_guess, num_iters=30, K=300, gamma=0.005, epsilon=1e-5, num_neighbors=10):
+    Vs = [pcd_to_numpy(source_pc), pcd_to_numpy(target_pc)]
+    features = []
+
+    pk = psreg.get_default_cluster_priors(K, gamma)
+    X = psreg.get_randn_cluster_means(Vs, K)
+    Q = psreg.get_default_cluster_precisions(Vs, X)
+    beta = psreg.get_default_beta(Q, gamma)
+
+    # source starts from global guess, target fixed at identity
+    R_src = init_guess[:3, :3].copy()
+    t_src = init_guess[:3, 3].copy()
+    R_tgt = np.eye(3)
+    t_tgt = np.zeros(3)
+    Ps = [(R_src, t_src), (R_tgt, t_tgt)]
+    
+    method = psreg.PSREG(beta, epsilon, pk, X, Q, [], debug=False)
+    TVs, X_model = method.register_points(Vs, features, num_iters,
+        Ps,
+        show_progress=True,
+        observation_weight_function=observation_weights.empirical_estimate_kdtree,
+        ow_args=num_neighbors
+    )
+    # print("type(TVs[0]) =", type(TVs[0]), "shape =", np.asarray(TVs[0]).shape)
+    # print("Ps[0] type:", type(Ps[0]), "len:", len(Ps[0]))
+    # print("Ps[0][0] shape:", np.asarray(Ps[0][0]).shape)
+    # print("Ps[0][1] shape:", np.asarray(Ps[0][1]).shape)
+    # TVs contains the refined transforms for each point set
+    R_refined, t_refined = Ps[0]
+    T_source_refined = np.eye(4)
+    T_source_refined[:3, :3] = R_refined
+    T_source_refined[:3, 3] = t_refined
+    
+    return SimpleNamespace(
+        transformation=T_source_refined,
+        result=TVs,
+        model=X_model,
+        fitness=None,
+        inlier_rmse=None
+    )
 
 def icp_refinement(source_pc, target_pc, init_guess, threshold=1.0, max_iter=100):
     source_pc = ensure_normals(source_pc)
@@ -75,12 +121,6 @@ def gicp_refinement(source_pc, target_pc, init_guess, threshold=1.0, max_iter=10
     criteria = make_icp_criteria(max_iter)
     return o3d.pipelines.registration.registration_generalized_icp(source_pc, target_pc, threshold, init_guess, o3d.pipelines.registration.TransformationEstimationForGeneralizedICP(), criteria)
 
-def vgicp_refinement(source_pc, target_pc, init_guess, threshold=1.0, max_iter=100):
-    source_np = pcd_to_numpy(source_pc)
-    target_np = pcd_to_numpy(target_pc)
-    transform = pygicp.align_points(target_np, source_np, initial_guess=init_guess, method="VGICP", max_correspondence_distance=threshold, voxel_resolution=reg.coarse_voxel, num_threads=4)
-    return SimpleNamespace(transformation=transform)
-
 def evaluate_alignment(source_pc, target_pc, transform, threshold):
     return o3d.pipelines.registration.evaluate_registration(source_pc, target_pc, threshold, transform)
 
@@ -90,11 +130,7 @@ def visualise_result(source_pc, target_pc, transform, title="Results for unassig
     source_temp.paint_uniform_color([1, 0.2, 0])
     target_temp.paint_uniform_color([0, 0.65, 0.93])
     source_temp.transform(transform)
-    o3d.visualization.draw_geometries(
-        [source_temp, target_temp],
-        window_name=title,
-        width=1000,
-        height=800)
+    o3d.visualization.draw_geometries([source_temp, target_temp], window_name=title, width=1000, height=800)
 
 def benchmark_method(name, method_fn, source_pc, target_pc, init_guess, threshold, max_iter):
     start = time.perf_counter()
@@ -139,12 +175,20 @@ def rank_results(results):
     return successful + failed
 
 def print_initial_evaluation(source_pc, target_pc, init_guess, threshold, show_visuals=False):
-    print("Before registration:")
+    print("After global registration:")
     initial_eval = evaluate_alignment(source_pc, target_pc, init_guess, threshold)
     print(initial_eval)
     if show_visuals:
         visualise_result(source_pc, target_pc, init_guess, title="Initial guess")
     return initial_eval
+
+def print_dare_evaluation(source_pc, target_pc, guess_refinement, threshold, show_visuals=False):
+    print("After DARE refinement:")
+    dare_eval = evaluate_alignment(source_pc, target_pc, guess_refinement, threshold)
+    print(dare_eval)
+    if show_visuals:
+        visualise_result(source_pc, target_pc, guess_refinement, title="DARE refinement")
+    return dare_eval
 
 def print_result_summary(results):
     print("===== Ranked benchmark summary =====")
@@ -171,21 +215,53 @@ def visualise_ranked_results(results, source_pc, target_pc, show_visuals=False):
             visualise_result(source_pc, target_pc, item["transformation"], title=item["method"])
 
 def main(show_visuals):
-    preprocess_cloud(src, voxel_size=reg.coarse_voxel)
-    preprocess_cloud(tgt, voxel_size=reg.coarse_voxel)
+    src_proc = preprocess_cloud(src, voxel_size=reg.coarse_voxel)
+    tgt_proc = preprocess_cloud(tgt, voxel_size=reg.coarse_voxel)
+    print("src points (processed):", np.asarray(src_proc.points).shape)
+    print("tgt points (processed):", np.asarray(tgt_proc.points).shape)
+    print("src points:", np.asarray(src.points).shape)
+    print("tgt points:", np.asarray(tgt.points).shape)
+
+    '''
+    print("src points:", np.asarray(src_proc.points).shape)
+    print("tgt points:", np.asarray(tgt_proc.points).shape)
+    
+    global_result = reg.get_initial_guess(src_proc, tgt_proc)
+    init_guess = global_result.transformation
+    initial_eval = print_initial_evaluation(src_proc, tgt_proc, init_guess, threshold, show_visuals=False)
+    
+    print("--- Testing ICP point-to-point ---")
+    r1 = icp_refinement(src_proc, tgt_proc, init_guess, threshold, max_iter)
+    print("Done:", r1.fitness)
+    
+    print("--- Testing ICP point-to-plane ---")
+    r2 = point_to_plane_refinement(src_proc, tgt_proc, init_guess, threshold, max_iter)
+    print("Done:", r2.fitness)
+    
+    print("--- Testing G-ICP ---")
+    r3 = gicp_refinement(src_proc, tgt_proc, init_guess, threshold, max_iter)
+    print("Done:", r3.fitness)
+    
+    print("--- Testing VG-ICP ---")
+    r4 = vgicp_refinement(src_proc, tgt_proc, init_guess, threshold, max_iter)
+    print("Done:", r4.transformation)
+    '''
     global_result = reg.get_initial_guess(src, tgt)
     init_guess = global_result.transformation
     initial_eval = print_initial_evaluation(src, tgt, init_guess, threshold, show_visuals=show_visuals)
     
+    dare_result = dare_refinement(src, tgt, init_guess, num_iters=30, K=300)
+    guess_refinement = dare_result.transformation
+    dare_eval = print_dare_evaluation(src, tgt, guess_refinement, threshold, show_visuals=show_visuals)
+    
     methods = [
         ("ICP (point-to-point)", icp_refinement),
         ("ICP (point-to-plane)", point_to_plane_refinement),
-        ("G-ICP", gicp_refinement),
-        ("VG-ICP", vgicp_refinement)]
+        ("G-ICP", gicp_refinement)]
     
     benchmark_results = [benchmark_method(name, fn, src, tgt, init_guess, threshold, max_iter) for name, fn in methods]
     ranked_results = rank_results(benchmark_results)
-    print("After registration:")
+    print("After local registration:")
     for item in ranked_results:
         print(f"\n\n===== {item['method']} =====")
         if item["success"]:
