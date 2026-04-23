@@ -6,11 +6,13 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 
-DARE_repo = Path("/home/jim/dare/DARE")
+SRC_DIR = Path(r"\\wsl.localhost\Ubuntu\home\jim\Codes\2d_line_scanner\src")
+DARE_repo = Path(r"\\wsl.localhost\Ubuntu\home\jim\dare\DARE")
+sys.path.insert(0, str(SRC_DIR))
 sys.path.insert(0, str(DARE_repo))
+
 from start import psreg
 from start import observation_weights
-
 from global_reg import Registration
 
 reg = Registration(3, 3)
@@ -29,7 +31,7 @@ demo_pcs = o3d.data.DemoICPPointClouds()
 tgt = o3d.io.read_point_cloud("data/Reg_block_2_smooth.ply")
 src = o3d.io.read_point_cloud("data/Reg_block_tripledented_abrupt_50000.ply")
 
-# #### Initial guess for transformation when global method not working ####
+#### Initial guess for transformation when global method not working ####
 # init_guess = np.asarray([
 #     [0.862, 0.011, -0.507, 0.5],
 #     [-0.139, 0.967, -0.215, 0.7],
