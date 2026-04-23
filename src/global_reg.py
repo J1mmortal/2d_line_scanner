@@ -1,5 +1,6 @@
 import open3d as o3d
 import numpy as np
+from types import SimpleNamespace
 import copy
 
 
@@ -49,11 +50,19 @@ class Registration:
             self.pcd.normals = mesh.vertex_normals
         return self.pcd
 
-    def poisson_convert(self, file, n_points=50000):
+    def convert_file_data(self, file, n_points=50000):
         mesh = o3d.io.read_triangle_mesh(file)
+        if len(mesh.triangles) == 0:
+            # fallback with relying on vertices for pc
+            print(f"[WARNING] No triangles in {file}, using vertices directly")
+            pcd = o3d.geometry.PointCloud()
+            pcd.points = mesh.vertices
+            mesh.compute_vertex_normals()
+            pcd.normals = mesh.vertex_normals
+            return pcd
+        
         mesh.compute_vertex_normals()
         pcd = mesh.sample_points_poisson_disk(number_of_points=n_points)
-
         return pcd
 
     def preprocess(self, pcd):
