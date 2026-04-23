@@ -60,9 +60,16 @@ class Registration:
             mesh.compute_vertex_normals()
             pcd.normals = mesh.vertex_normals
             return pcd
-        
+
         mesh.compute_vertex_normals()
         pcd = mesh.sample_points_poisson_disk(number_of_points=n_points)
+        return pcd
+
+    def poisson_convert(self, file, n_points=50000):
+        mesh = o3d.io.read_triangle_mesh(file)
+        mesh.compute_vertex_normals()
+        pcd = mesh.sample_points_poisson_disk(number_of_points=n_points)
+
         return pcd
 
     def preprocess(self, pcd):
@@ -113,19 +120,21 @@ class Registration:
         )
         return result
 
-    def refine_icp(self, source, target, init_transform):
+    def refine_icp(self, source, target, init_transform, K=10):
         source = self.ensure_normals(copy.deepcopy(source))
         target = self.ensure_normals(copy.deepcopy(target))
 
         # Downweights points with large residuals. Should reduce effect of damaged region on registration
-        tukey_kernel = o3d.pipelines.registration.TukeyLoss(k=10)
+        tukey_kernel = o3d.pipelines.registration.TukeyLoss(k=K)
 
         result = o3d.pipelines.registration.registration_icp(
             source,
             target,
             max_correspondence_distance=self.max_correspondence_distance,
             init=init_transform,
-            estimation_method=o3d.pipelines.registration.TransformationEstimationPointToPlane(),
+            estimation_method=o3d.pipelines.registration.TransformationEstimationPointToPlane(
+                tukey_kernel
+            ),
             criteria=self.criteria,
         )
         return result
