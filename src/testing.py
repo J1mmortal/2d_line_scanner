@@ -1,6 +1,9 @@
 import open3d as o3d
 from global_reg import Registration
 import copy
+from damage_detection import DamageDetector
+
+det = DamageDetector()
 
 dataset = o3d.data.DemoICPPointClouds()
 src = o3d.io.read_point_cloud(dataset.paths[0])
@@ -10,7 +13,7 @@ tgt = o3d.io.read_point_cloud(dataset.paths[1])
 # # src = o3d.io.read_point_cloud(dataset.paths[0])
 # # tgt = o3d.io.read_point_cloud(dataset.paths[1])
 
-reg = Registration()
+reg = Registration(3, 3)
 icp_result, global_result = reg.register(src, tgt)
 
 tf = icp_result.transformation

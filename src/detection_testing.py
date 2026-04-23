@@ -11,7 +11,11 @@ det = DamageDetector()
 f1 = "C:/Users/fvsch/OneDrive/Desktop/TUDelft/Y3/BEP/Reg_block.stl"
 f2 = "C:/Users/fvsch/OneDrive/Desktop/TUDelft/Y3/BEP/Reg_block_tripledented.stl"
 
-tgt, src = reg.poisson_convert(f1), reg.poisson_convert(f2)
+tgt, src = reg.poisson_convert(f1, 200000), reg.poisson_convert(f2, 200000)
+
+# dataset = o3d.data.DemoICPPointClouds()
+# src = o3d.io.read_point_cloud(dataset.paths[0])
+# tgt = o3d.io.read_point_cloud(dataset.paths[1])
 
 icp, _ = reg.register(src, tgt)
 
@@ -19,7 +23,7 @@ aligned_src = copy.deepcopy(src)
 aligned_src.transform(icp.transformation)
 
 # o3d.io.write_point_cloud("Aligned_block.ply", aligned_src)
-o3d.io.write_point_cloud("Original_block.ply", tgt)
+# o3d.io.write_point_cloud("Original_block.ply", tgt)
 
 # distance, _ = det.compute_bidirectional_c2c(aligned_source=aligned_src, target=tgt)
 
