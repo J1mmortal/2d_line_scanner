@@ -19,20 +19,20 @@ aligned_src = copy.deepcopy(src)
 aligned_src.transform(icp.transformation)
 
 # o3d.io.write_point_cloud("Aligned_block.ply", aligned_src)
-# o3d.io.write_point_cloud("Original6_block", tgt)
+o3d.io.write_point_cloud("Original_block.ply", tgt)
 
-distance, _ = det.compute_bidirectional_c2c(aligned_source=aligned_src, target=tgt)
+# distance, _ = det.compute_bidirectional_c2c(aligned_source=aligned_src, target=tgt)
 
-mean, std, _ = det.estimate_noise(distance, 80)
+# mean, std, _ = det.estimate_noise(distance, 80)
 
-mask, distances, _ = det.detect(
-    aligned_source=aligned_src, target=tgt, noise_floor=mean, noise_std=std
-)
+# mask, distances, _ = det.detect(
+#     aligned_source=aligned_src, target=tgt, noise_floor=mean, noise_std=std
+# )
 
-det.visualise_colourmap(aligned_src, distances=distances)
+# det.visualise_colourmap(aligned_src, distances=distances)
 
-det.visualise_binary(aligned_src, mask)
+# det.visualise_binary(aligned_src, mask)
 
-labels = det.cluster(aligned_source=aligned_src, damage_mask=mask)
+# labels = det.cluster(aligned_source=aligned_src, damage_mask=mask)
 
-det.color_point_cloud_by_labels(aligned_src, labels)
+# det.color_point_cloud_by_labels(aligned_src, labels)
