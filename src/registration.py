@@ -16,17 +16,18 @@ from global_reg import Registration
 reg = Registration(3, 3)
 threshold = reg.max_correspondence_distance
 max_iter = reg.max_iteration
-show_visuals = True
+show_visuals = False
 density_aware = True
-
 
 demo_pcs = o3d.data.DemoICPPointClouds()
 # src = o3d.io.read_point_cloud(demo_pcs.paths[0])
 # tgt = o3d.io.read_point_cloud(demo_pcs.paths[1])
 
-tgt = reg.convert_file_data("data/Reg_block_2.STL", n_points=50000)
-src = reg.convert_file_data("data/Reg_block_tripledented.STL", n_points=50000)
+# tgt = reg.convert_file_data("data/Reg_block_2.STL", n_points=50000)
+# src = reg.convert_file_data("data/Reg_block_tripledented.STL", n_points=50000)
 
+tgt = o3d.io.read_point_cloud("data/Reg_block_2_smooth.ply")
+src = o3d.io.read_point_cloud("data/Reg_block_tripledented_abrupt_50000.ply")
 
 # #### Initial guess for transformation when global method not working ####
 # init_guess = np.asarray([
