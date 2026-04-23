@@ -6,27 +6,32 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 
-DARE_repo = Path("/home/jim/dare/DARE")
+SRC_DIR = Path(r"\\wsl.localhost\Ubuntu\home\jim\Codes\2d_line_scanner\src")
+DARE_repo = Path(r"\\wsl.localhost\Ubuntu\home\jim\dare\DARE")
+sys.path.insert(0, str(SRC_DIR))
 sys.path.insert(0, str(DARE_repo))
+
 from start import psreg
 from start import observation_weights
-
 from global_reg import Registration
 
-reg = Registration()
+reg = Registration(3, 3)
 threshold = reg.max_correspondence_distance
 max_iter = reg.max_iteration
-show_visuals = True
-
+show_visuals = False
+density_aware = True
 
 demo_pcs = o3d.data.DemoICPPointClouds()
-src = o3d.io.read_point_cloud(demo_pcs.paths[0])
-tgt = o3d.io.read_point_cloud(demo_pcs.paths[1])
+# src = o3d.io.read_point_cloud(demo_pcs.paths[0])
+# tgt = o3d.io.read_point_cloud(demo_pcs.paths[1])
 
 # tgt = reg.convert_file_data("data/Reg_block_2.STL", n_points=50000)
-# src = reg.convert_file_data("data/Reg_block_dented.STL", n_points=50000)
+# src = reg.convert_file_data("data/Reg_block_tripledented.STL", n_points=50000)
 
-# #### Initial guess for transformation when global method not working ####
+tgt = o3d.io.read_point_cloud("data/Reg_block_2_smooth.ply")
+src = o3d.io.read_point_cloud("data/Reg_block_tripledented_abrupt_50000.ply")
+
+#### Initial guess for transformation when global method not working ####
 # init_guess = np.asarray([
 #     [0.862, 0.011, -0.507, 0.5],
 #     [-0.139, 0.967, -0.215, 0.7],
@@ -64,10 +69,12 @@ def pcd_to_numpy(pc):
 def make_icp_criteria(max_iter):
     return o3d.pipelines.registration.ICPConvergenceCriteria(relative_fitness=reg.relative_fitness, relative_rmse=reg.relative_rmse, max_iteration=max_iter)
 
-def dare_refinement(source_pc, target_pc, init_guess, num_iters=30, K=300, gamma=0.005, epsilon=1e-5, num_neighbors=10):
+def dare_refinement(source_pc, target_pc, init_guess, num_iters=30, K=None, K_max=300, gamma=0.005, epsilon=1e-5, num_neighbors=10, points_per_comp=200):
     Vs = [pcd_to_numpy(source_pc), pcd_to_numpy(target_pc)]
     features = []
-
+    if K is None:
+        N = Vs[0].shape[1] + Vs[1].shape[1]
+        K = min(max(10, N // points_per_comp), K_max)
     pk = psreg.get_default_cluster_priors(K, gamma)
     X = psreg.get_randn_cluster_means(Vs, K)
     Q = psreg.get_default_cluster_precisions(Vs, X)
@@ -241,20 +248,28 @@ def main(show_visuals):
     r4 = vgicp_refinement(src_proc, tgt_proc, init_guess, threshold, max_iter)
     print("Done:", r4.transformation)
     '''
-    global_result = timed_step("global initial guess (RANSAC+FPFH)", reg.get_initial_guess, src, tgt)
-    init_guess = global_result.transformation
-    initial_eval = timed_step("evaluate + visualise global result", print_initial_evaluation, src, tgt, init_guess, threshold, show_visuals=show_visuals)
-    
-    dare_result = timed_step("DARE refinement", dare_refinement, src, tgt, init_guess, num_iters=30, K=300)
-    guess_refinement = dare_result.transformation
-    dare_eval = timed_step("evaluate + visualise DARE result", print_dare_evaluation, src, tgt, guess_refinement, threshold, show_visuals=show_visuals)    
+    if density_aware == True:
+        global_result = timed_step("global initial guess (RANSAC+FPFH)", reg.get_initial_guess, src, tgt)
+        init_guess = global_result.transformation
+        initial_eval = timed_step("evaluate + visualise global result", print_initial_evaluation, src, tgt, init_guess, threshold, show_visuals=show_visuals)
+        dare_result = timed_step("DARE refinement", dare_refinement, src_proc, tgt_proc, init_guess, num_iters=15, points_per_comp=500)
+        guess_refinement = dare_result.transformation
+        dare_eval = timed_step("evaluate + visualise DARE result", print_dare_evaluation, src, tgt, guess_refinement, threshold, show_visuals=show_visuals)    
+        guess = guess_refinement
+    else:
+        global_result = timed_step("global initial guess (RANSAC+FPFH)", reg.get_initial_guess, src, tgt)
+        init_guess = global_result.transformation
+        initial_eval = timed_step("evaluate + visualise global result", print_initial_evaluation, src, tgt, init_guess, threshold, show_visuals=show_visuals)
+        guess = init_guess
+        guess_refinement = None
+        dare_eval = None
 
     methods = [
         ("ICP (point-to-point)", icp_refinement),
         ("ICP (point-to-plane)", point_to_plane_refinement),
         ("G-ICP", gicp_refinement)]
     def _run_benchmarks():
-        return [benchmark_method(name, fn, src, tgt, guess_refinement, threshold, max_iter) for name, fn in methods]
+        return [benchmark_method(name, fn, src, tgt, guess, threshold, max_iter) for name, fn in methods]
     benchmark_results = timed_step("all local methods (benchmarks)", _run_benchmarks)
     ranked_results = rank_results(benchmark_results)
     def _print_local_results():
@@ -286,7 +301,6 @@ def main(show_visuals):
     total_runtime = time.perf_counter() - total_start
     print(f"\n===== TOTAL wall clock time =====\n{total_runtime:.3f} s")
     visualise_ranked_results(ranked_results, src, tgt, show_visuals=show_visuals)
-
     return {
         "initial_evaluation": initial_eval,
         "initial_guess": init_guess,
