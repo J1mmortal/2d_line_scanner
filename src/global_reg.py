@@ -189,5 +189,5 @@ class Registration:
 
     def register(self, source, target):
         ransac_result = self.get_initial_guess(source, target)
-        icp_result = self.refine_icp(source, target, ransac_result.transformation)
+        icp_result = self.gen_icp(source, target, ransac_result.transformation)
         return icp_result, ransac_result

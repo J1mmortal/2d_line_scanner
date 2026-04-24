@@ -85,12 +85,12 @@ if __name__ == "__main__":
     cc_executable = Path(r"C:\Program Files\CloudCompare\CloudCompare.exe")
 
     reference_scan = Path(
-        r"C:\Users\fvsch\OneDrive\Documents\Code\TUDelft\Y3\BEP\2d_line_scanner\data\CC\TGT.ply"
+        r"C:\Users\fvsch\OneDrive\Documents\Code\TUDelft\Y3\BEP\2d_line_scanner\data\CC\sin_tgt.ply"
     )
     compared_scan = Path(
-        r"C:\Users\fvsch\OneDrive\Documents\Code\TUDelft\Y3\BEP\2d_line_scanner\data\CC\SRC.ply"
+        r"C:\Users\fvsch\OneDrive\Documents\Code\TUDelft\Y3\BEP\2d_line_scanner\data\CC\sin_src_reg.ply"
     )
-    m3c2_parameters = Path(r"..\data\m3c2_params1.txt")
+    m3c2_parameters = Path(r"..\data\m3c2_params.txt")
 
     # run_c2c_pipeline(compared_scan, reference_scan, cc_executable)
     run_m3c2_pipeline(reference_scan, compared_scan, m3c2_parameters, cc_executable)

@@ -2,7 +2,9 @@ import open3d as o3d
 import numpy as np
 import matplotlib.pyplot as plt
 import copy
-from sklearn.cluster import DBSCAN
+
+# from sklearn.cluster import DBSCAN
+from scipy.spatial import cKDTree
 
 
 class DamageDetector:
@@ -18,6 +20,26 @@ class DamageDetector:
         self.dbscan_min_points = dbscan_min_points
         self.keep_largest_cluster = keep_largest_cluster
 
+    def downsample(self, pcd, voxel_ratio=0.008, normal_max_nn=30):
+        bbox = pcd.get_axis_aligned_bounding_box()
+        extent = bbox.get_extent()
+        max_dimension = np.max(extent)
+
+        # Set voxel size to X% of the largest dimension (e.g., 0.01 = 1%)
+        dynamic_voxel = max_dimension * voxel_ratio
+
+        # Downsample
+        pcd_down = pcd.voxel_down_sample(voxel_size=dynamic_voxel)
+
+        # Estimate normals. radius must scale with the dynamic voxel.
+        pcd_down.estimate_normals(
+            o3d.geometry.KDTreeSearchParamHybrid(
+                radius=dynamic_voxel * 2.5,
+                max_nn=normal_max_nn,
+            )
+        )
+        return pcd_down
+
     def detect(self, aligned_source, target, noise_floor, noise_std):
         pcd_dist = aligned_source.compute_point_cloud_distance(target)
         distances = np.asarray(pcd_dist)
@@ -27,22 +49,67 @@ class DamageDetector:
 
         return damage_mask, distances, pcd_dist
 
-    def cluster(self, aligned_source, damage_mask, eps=2, min_samples=10):
+    def cluster(
+        self, aligned_source, damage_mask, eps=2.0, min_samples=10
+    ):  # EPS parameter is very important, must be chosen to match data magnitude and point density
         xyz = np.asarray(aligned_source.points)
-
         xyz_damage = xyz[damage_mask]
 
-        db = DBSCAN(
-            eps=eps,
-            min_samples=min_samples,
-            metric="euclidean",
-            n_jobs=-1,
+        # Handle edge case where no damage is found
+        if len(xyz_damage) == 0:
+            return np.full(len(xyz), -1, dtype=int)
+
+        # Push damaged points into a temporary Open3D object
+        damage_pcd = o3d.geometry.PointCloud()
+        damage_pcd.points = o3d.utility.Vector3dVector(xyz_damage)
+
+        # Execute C++ optimized DBSCAN
+        labels = np.asarray(
+            damage_pcd.cluster_dbscan(
+                eps=eps, min_points=min_samples, print_progress=True
+            )
         )
 
-        labels = db.fit_predict(xyz_damage)
-
+        # Map labels back to the full array
         full_labels = np.full(len(xyz), -1, dtype=int)
         full_labels[damage_mask] = labels
+
+        return full_labels
+
+    def cluster_fast(
+        self, aligned_source, damage_mask, voxel_size=0.5, eps=2.0, min_samples=10
+    ):
+        xyz = np.asarray(aligned_source.points)
+        xyz_damage = xyz[damage_mask]
+
+        if len(xyz_damage) == 0:
+            return np.full(len(xyz), -1, dtype=int)
+
+        # 1. Isolate damage and downsample
+        damage_pcd = o3d.geometry.PointCloud()
+        damage_pcd.points = o3d.utility.Vector3dVector(xyz_damage)
+
+        # voxel_size must be scaled to your coordinate units
+        down_pcd = damage_pcd.voxel_down_sample(voxel_size=voxel_size)
+        down_xyz = np.asarray(down_pcd.points)
+
+        # 2. Cluster the lightweight downsampled cloud
+        # print_progress=True will prove if the algorithm is actually hanging
+        labels_down = np.asarray(
+            down_pcd.cluster_dbscan(
+                eps=eps, min_points=min_samples, print_progress=True
+            )
+        )
+
+        # 3. Map labels back to the dense damage points using a KDTree
+        # This finds the nearest downsampled point for every dense point and copies its label
+        tree = cKDTree(down_xyz)
+        _, indices = tree.query(xyz_damage, k=1)
+        labels_dense = labels_down[indices]
+
+        # 4. Reconstruct the full label array
+        full_labels = np.full(len(xyz), -1, dtype=int)
+        full_labels[damage_mask] = labels_dense
 
         return full_labels
 
@@ -70,7 +137,7 @@ class DamageDetector:
         colors[labels == -1] = noise_color
         pcd.colors = o3d.utility.Vector3dVector(colors)
 
-        o3d.visualization.draw_geometries([pcd])
+        o3d.visualization.draw_geometries([self.downsample(pcd)])
 
     def estimate_noise(self, distances, percentile=80):
         bulk_cutoff = np.percentile(distances, percentile)
@@ -128,8 +195,12 @@ class DamageDetector:
         vis_pcd = copy.deepcopy(pcd)
         vis_pcd.colors = o3d.utility.Vector3dVector(colors)
 
+        pcd = self.downsample(vis_pcd)
         o3d.visualization.draw_geometries(
-            [vis_pcd], window_name="Binary Damage Mask 3D", width=1200, height=800
+            [pcd],
+            window_name="Binary Damage Mask 3D",
+            width=1200,
+            height=800,
         )
 
     def visualise_colourmap(self, pcd, distances):
@@ -148,6 +219,10 @@ class DamageDetector:
         vis_pcd = copy.deepcopy(pcd)
         vis_pcd.colors = o3d.utility.Vector3dVector(colors_rgb)
 
+        pcd = self.downsample(vis_pcd)
         o3d.visualization.draw_geometries(
-            [vis_pcd], window_name="C2C Damage Heatmap", width=1200, height=800
+            [pcd],
+            window_name="C2C Damage Heatmap",
+            width=1200,
+            height=800,
         )
