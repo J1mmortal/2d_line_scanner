@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 
 
-def visualize_c2c_open3d(las_path: Path):
+def visualize_las(las_path: Path):
     if not las_path.exists():
         raise FileNotFoundError(f"File not found: {las_path}")
 
@@ -15,8 +15,13 @@ def visualize_c2c_open3d(las_path: Path):
 
     # 2. Extract distance scalar field
     # The name varies. If this fails, read the terminal output to find the correct string.
-    # dimension_name = "C2C absolute distances"
-    dimension_name = "M3C2 distance"
+    if "M3C2" in str(las_path):
+        dimension_name = "M3C2 distance"
+    elif "C2C" in str(las_path):
+        dimension_name = "C2C absolute distances"
+    else:
+        raise RuntimeError("Incorrect file loaded")
+
     try:
         # laspy accesses dimensions as attributes or dictionary keys
         distances = getattr(las, dimension_name)
@@ -67,7 +72,7 @@ if __name__ == "__main__":
     # target_file = Path(r"..\data\CC\SRC_C2C_DIST_2026-04-24_09h43_25_767.las")
     target_file = Path(r"..\data\CC\sin_tgt_M3C2.las")
     # target_file = Path(r"..\data\CC\sin_src_reg_C2C_DIST_2026-04-24_12h39_24_664.las")
-    pcd, distances = visualize_c2c_open3d(target_file)
+    pcd, distances = visualize_las(target_file)
     det.visualise_colourmap(pcd, distances)
 
     mean, std, thresh = det.estimate_noise(distances)

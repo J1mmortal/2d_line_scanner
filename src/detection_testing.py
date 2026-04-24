@@ -28,13 +28,13 @@ icp, _ = reg.register(src, tgt)
 aligned_src = copy.deepcopy(src)
 aligned_src.transform(icp.transformation)
 
-# o3d.visualization.draw_geometries(
-#     [src, tgt], window_name="BEFORE", width=800, height=600
-# )
+o3d.visualization.draw_geometries(
+    [src, tgt], window_name="BEFORE", width=800, height=600
+)
 
-# o3d.visualization.draw_geometries(
-#     [aligned_src, tgt], window_name="AFTER", width=800, height=600
-# )
+o3d.visualization.draw_geometries(
+    [aligned_src, tgt], window_name="AFTER", width=800, height=600
+)
 
 
 distance, _ = det.compute_bidirectional_c2c(aligned_source=aligned_src, target=tgt)
