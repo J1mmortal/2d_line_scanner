@@ -22,6 +22,13 @@ def visualize_las(las_path: Path):
     else:
         raise RuntimeError("Incorrect file loaded")
 
+    if "M3C2" in str(las_path):
+        dimension_name = "M3C2 distance"
+    elif "C2C" in str(las_path):
+        dimension_name = "C2C absolute distances"
+    else:
+        raise RuntimeError("Incorrect file loaded")
+
     try:
         # laspy accesses dimensions as attributes or dictionary keys
         distances = getattr(las, dimension_name)
