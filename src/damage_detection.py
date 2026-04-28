@@ -226,3 +226,58 @@ class DamageDetector:
             width=1200,
             height=800,
         )
+
+    def calculate_damage_metrics(
+        self, pcd, distances, labels, target_cluster_id, grid_res=0.25
+    ):
+        """
+        Calculates 2.5D metrics for a specific damage cluster.
+        grid_res MUST be in the same physical units as your XYZ coordinates.
+        """
+        # 1. Isolate the target cluster
+        xyz = np.asarray(pcd.points)
+
+        mask = labels == target_cluster_id
+        c_xyz = xyz[mask]
+        c_dist = np.abs(distances[mask])  # Ensure distances are positive magnitudes
+
+        if len(c_xyz) == 0:
+            raise ValueError(f"Cluster {target_cluster_id} contains no points.")
+
+        # 2. Shift coordinates to local origin for grid indexing
+        # Assumption: The damage is roughly aligned to the XY plane.
+        x_local = c_xyz[:, 0] - np.min(c_xyz[:, 0])
+        y_local = c_xyz[:, 2] - np.min(c_xyz[:, 2])
+
+        # 3. Convert coordinates to integer grid indices
+        x_idx = (x_local / grid_res).astype(int)
+        y_idx = (y_local / grid_res).astype(int)
+
+        # 4. Initialize the 2D raster grid
+        max_x, max_y = np.max(x_idx), np.max(y_idx)
+        grid = np.zeros((max_x + 1, max_y + 1))
+
+        # 5. Populate the grid.
+        # If multiple laser points fall in the same cell, we take the maximum damage depth.
+        np.maximum.at(grid, (x_idx, y_idx), c_dist)
+
+        # --- METRIC CALCULATIONS ---
+
+        # Area
+        cell_area = grid_res**2
+        active_cells = np.count_nonzero(grid)
+        projected_area = active_cells * cell_area
+
+        # Volume (Sum of depth * area for all cells)
+        volume = np.sum(grid) * cell_area
+
+        # Max Depth
+        max_depth = np.max(grid)
+
+        return {
+            "cluster_id": target_cluster_id,
+            "projected_area": projected_area,
+            "volume": volume,
+            "max_depth": max_depth,
+            "grid_matrix": grid,  # Returned so you can slice cross-sections
+        }
