@@ -227,7 +227,10 @@ class DamageDetector:
             height=800,
         )
 
+<<<<<<< HEAD
     # Need to correctly pass the damage plane as coming from the scanner
+=======
+>>>>>>> 4cb8b1656e0cbc954214d54b61c4a4a732b46953
     def calculate_damage_metrics(
         self, pcd, distances, labels, target_cluster_id, grid_res=0.25
     ):
