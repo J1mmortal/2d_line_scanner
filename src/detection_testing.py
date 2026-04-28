@@ -28,13 +28,13 @@ icp, _ = reg.register(src, tgt)
 aligned_src = copy.deepcopy(src)
 aligned_src.transform(icp.transformation)
 
-o3d.visualization.draw_geometries(
-    [src, tgt], window_name="BEFORE", width=800, height=600
-)
+# o3d.visualization.draw_geometries(
+#     [src, tgt], window_name="BEFORE", width=800, height=600
+# )
 
-o3d.visualization.draw_geometries(
-    [aligned_src, tgt], window_name="AFTER", width=800, height=600
-)
+# o3d.visualization.draw_geometries(
+#     [aligned_src, tgt], window_name="AFTER", width=800, height=600
+# )
 
 
 distance, _ = det.compute_bidirectional_c2c(aligned_source=aligned_src, target=tgt)
@@ -49,12 +49,16 @@ det.visualise_colourmap(aligned_src, distances=distances)
 
 det.visualise_binary(aligned_src, mask)
 
-labels = det.cluster(aligned_source=aligned_src, damage_mask=mask, eps=0.2)
+# labels = det.cluster(aligned_source=aligned_src, damage_mask=mask, eps=0.2)
 
-det.color_point_cloud_by_labels(aligned_src, labels)
+# det.color_point_cloud_by_labels(aligned_src, labels)
 
 labels = det.cluster_fast(
     aligned_source=aligned_src, damage_mask=mask, voxel_size=0.2, eps=0.5
 )
 
 det.color_point_cloud_by_labels(aligned_src, labels)
+
+dict = det.calculate_damage_metrics(aligned_src, distances, labels, 0)
+print(set(labels))
+print(dict)
