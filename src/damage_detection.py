@@ -139,14 +139,14 @@ class DamageDetector:
 
         o3d.visualization.draw_geometries([self.downsample(pcd)])
 
-    def estimate_noise(self, distances, percentile=80):
+    def estimate_noise(self, distances, percentile=80, sigma_thresh=3):
         bulk_cutoff = np.percentile(distances, percentile)
         bulk_dists = distances[distances < bulk_cutoff]
 
         noise_mean = float(bulk_dists.mean())
         noise_std = float(bulk_dists.std())
 
-        threshold = noise_mean + self.damage_sigma_threshold * noise_std
+        threshold = noise_mean + sigma_thresh * noise_std
 
         return noise_mean, noise_std, threshold
 
@@ -228,9 +228,7 @@ class DamageDetector:
         )
 
     # Need to correctly pass the damage plane as coming from the scanner
-    def calculate_damage_metrics(
-        self, pcd, distances, labels, target_cluster_id, grid_res=0.25
-    ):
+    def calculate_damage_metrics(self, pcd, distances, labels, grid_res=0.25):
         """
         Calculates 2.5D metrics for a specific damage cluster.
         grid_res MUST be in the same physical units as your XYZ coordinates.
@@ -238,47 +236,54 @@ class DamageDetector:
         # 1. Isolate the target cluster
         xyz = np.asarray(pcd.points)
 
-        mask = labels == target_cluster_id
-        c_xyz = xyz[mask]
-        c_dist = np.abs(distances[mask])  # Ensure distances are positive magnitudes
+        all_metrics = {}
+        unique_ids = np.unique(labels)
 
-        if len(c_xyz) == 0:
-            raise ValueError(f"Cluster {target_cluster_id} contains no points.")
+        for id in unique_ids:
+            if id == -1:
+                continue
 
-        # 2. Shift coordinates to local origin for grid indexing
-        # Assumption: The damage is roughly aligned to the XY plane.
-        x_local = c_xyz[:, 0] - np.min(c_xyz[:, 0])
-        y_local = c_xyz[:, 2] - np.min(c_xyz[:, 2])
+            mask = labels == id
+            c_xyz = xyz[mask]
+            c_dist = np.abs(distances[mask])  # Ensure distances are positive magnitudes
 
-        # 3. Convert coordinates to integer grid indices
-        x_idx = (x_local / grid_res).astype(int)
-        y_idx = (y_local / grid_res).astype(int)
+            if len(c_xyz) == 0:
+                raise ValueError(f"Cluster {id} contains no points.")
 
-        # 4. Initialize the 2D raster grid
-        max_x, max_y = np.max(x_idx), np.max(y_idx)
-        grid = np.zeros((max_x + 1, max_y + 1))
+            # 2. Shift coordinates to local origin for grid indexing
+            # Assumption: The damage is roughly aligned to the XY plane.
+            x_local = c_xyz[:, 0] - np.min(c_xyz[:, 0])
+            y_local = c_xyz[:, 2] - np.min(c_xyz[:, 2])
 
-        # 5. Populate the grid.
-        # If multiple laser points fall in the same cell, we take the maximum damage depth.
-        np.maximum.at(grid, (x_idx, y_idx), c_dist)
+            # 3. Convert coordinates to integer grid indices
+            x_idx = (x_local / grid_res).astype(int)
+            y_idx = (y_local / grid_res).astype(int)
 
-        # --- METRIC CALCULATIONS ---
+            # 4. Initialize the 2D raster grid
+            max_x, max_y = np.max(x_idx), np.max(y_idx)
+            grid = np.zeros((max_x + 1, max_y + 1))
 
-        # Area
-        cell_area = grid_res**2
-        active_cells = np.count_nonzero(grid)
-        projected_area = active_cells * cell_area
+            # 5. Populate the grid.
+            # If multiple laser points fall in the same cell, we take the maximum damage depth.
+            np.maximum.at(grid, (x_idx, y_idx), c_dist)
 
-        # Volume (Sum of depth * area for all cells)
-        volume = np.sum(grid) * cell_area
+            # --- METRIC CALCULATIONS ---
 
-        # Max Depth
-        max_depth = np.max(grid)
+            # Calculate metrics and cast to native Python types
+            cell_area = float(grid_res**2)
+            active_cells = int(np.count_nonzero(grid))
 
-        return {
-            "cluster_id": target_cluster_id,
-            "projected_area": projected_area,
-            "volume": volume,
-            "max_depth": max_depth,
-            "grid_matrix": grid,  # Returned so you can slice cross-sections
-        }
+            projected_area = float(active_cells * cell_area)
+            volume = float(np.sum(grid) * cell_area)
+            max_depth = float(np.max(grid))
+
+            # Append to the master dictionary using the ID as the key
+            # Cast the cluster_id to int as well if it originated from a NumPy array
+            all_metrics[int(id)] = {
+                "projected_area": projected_area,
+                "volume": volume,
+                "max_depth": max_depth,
+                # "grid_matrix": grid,
+            }
+
+        return all_metrics
