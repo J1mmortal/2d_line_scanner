@@ -5,7 +5,7 @@ import open3d as o3d
 from damage_detection import DamageDetector
 from global_reg import Registration
 
-reg = Registration(course_voxel=3, voxel_size=3)
+reg = Registration(coarse_voxel=3, voxel_size=3)
 det = DamageDetector(damage_sigma_threshold=4)
 
 tgt = o3d.io.read_point_cloud("../data/CC/TGT.ply")

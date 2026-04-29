@@ -4,49 +4,38 @@ import copy
 import matplotlib.pyplot as plt
 
 from global_reg import Registration
+from damage_detection import DamageDetector
 
-# reg = Registration()
+reg = Registration()
+det = DamageDetector()
 
+# src = reg.load_pcd("../data/CC/sin_src.ply")
+# tgt = reg.load_pcd("../data/CC/sin_tgt.ply")
 
-# mesh1 = o3d.io.read_triangle_mesh(
-#     "C:/Users/fvsch/OneDrive/Desktop/TUDelft/Y3/BEP/Reg_block.stl"
-# )
-# mesh1.compute_vertex_normals()
+dataset = o3d.data.DemoICPPointClouds()
+src = o3d.io.read_point_cloud(dataset.paths[0])
+tgt = o3d.io.read_point_cloud(dataset.paths[1])
 
-# tgt = mesh1.sample_points_poisson_disk(number_of_points=30_000)
-# tgt.paint_uniform_color([0, 0.65, 1])
+# reg.set_voxel(src, ratio=0.005, coarse_ratio=0.01)
 
-# mesh2 = o3d.io.read_triangle_mesh(
-#     "C:/Users/fvsch/OneDrive/Desktop/TUDelft/Y3/BEP/Reg_block_tripledented.stl"
-# )
-# mesh2.compute_vertex_normals()
+# o3d.visualization.draw_geometries([src])
+# reg.visualise_result(src, tgt)
 
-# src = mesh2.sample_points_poisson_disk(number_of_points=30_000)
-# src.paint_uniform_color([1, 0.7, 0])
+# icp, _ = reg.register(src, tgt)
 
+# reg.visualise_result(src, tgt)
+# reg.visualise_result(src, tgt, transform=icp.transformation)
 
-# o3d.visualization.draw_geometries([tgt, src], window_name="Block")
+# Assuming 'reg' is your Registration instance, 'src' and 'tgt' are processed clouds
+ransac_result = reg.get_initial_guess(src, tgt)
+init_guess = ransac_result.transformation
 
-tgt = o3d.io.read_point_cloud("../data/CC/sin_tgt.ply")
-src = o3d.io.read_point_cloud("../data/CC/sin_src.ply")
+results = []
+results.append(reg.benchmark_method(reg.icp, src, tgt, init_guess))
+results.append(reg.benchmark_method(reg.plane_icp, src, tgt, init_guess))
+results.append(reg.benchmark_method(reg.gen_icp, src, tgt, init_guess))
 
-reg = Registration(3, 3)
-icp_result, global_result = reg.register(src, tgt)
+reg.print_result_summary(results)
 
-tf = icp_result.transformation
-print(f"ICP RMSE: {icp_result.inlier_rmse}, RANSCAC RMSE: {global_result.inlier_rmse}")
-
-src.paint_uniform_color([1, 0.7, 0])  # orange
-tgt.paint_uniform_color([0, 0.65, 1])  # blue
-
-alg_src = copy.deepcopy(src)
-alg_src.transform(tf)
-
-# # Show before and after in two windows
-# o3d.visualization.draw_geometries(
-#     [src, tgt], window_name="BEFORE", width=800, height=600
-# )
-
-# o3d.visualization.draw_geometries(
-#     [alg_src, tgt], window_name="AFTER", width=800, height=600
-# )
+tf = results[0]["transformation"]
+reg.visualise_result(src, tgt, transform=tf, downsample=0.008)
