@@ -3,22 +3,12 @@ import numpy as np
 import matplotlib.pyplot as plt
 import copy
 
-# from sklearn.cluster import DBSCAN
 from scipy.spatial import cKDTree
 
 
 class DamageDetector:
-    def __init__(
-        self,
-        damage_sigma_threshold=3.0,
-        dbscan_eps=2.0,
-        dbscan_min_points=30,
-        keep_largest_cluster=False,
-    ):
+    def __init__(self, damage_sigma_threshold=3.0):
         self.damage_sigma_threshold = damage_sigma_threshold
-        self.dbscan_eps = dbscan_eps
-        self.dbscan_min_points = dbscan_min_points
-        self.keep_largest_cluster = keep_largest_cluster
 
     def downsample(self, pcd, voxel_ratio=0.008, normal_max_nn=30):
         bbox = pcd.get_axis_aligned_bounding_box()
@@ -40,11 +30,14 @@ class DamageDetector:
         )
         return pcd_down
 
-    def detect(self, aligned_source, target, noise_floor, noise_std):
+    def detect(self, aligned_source, target, sigma_thresh=3):
         pcd_dist = aligned_source.compute_point_cloud_distance(target)
         distances = np.asarray(pcd_dist)
 
-        threshold = noise_floor + self.damage_sigma_threshold * noise_std
+        mean, std, threshold = self.estimate_noise(
+            distances, percentile=80, sigma_thresh=sigma_thresh
+        )
+
         damage_mask = distances > threshold
 
         return damage_mask, distances, pcd_dist
@@ -228,7 +221,9 @@ class DamageDetector:
         )
 
     # Need to correctly pass the damage plane as coming from the scanner
-    def calculate_damage_metrics(self, pcd, distances, labels, grid_res=0.25):
+    def calculate_damage_metrics(
+        self, pcd, distances, labels, grid_res=0.25, cmap_name="tab20"
+    ):
         """
         Calculates 2.5D metrics for a specific damage cluster.
         grid_res MUST be in the same physical units as your XYZ coordinates.
@@ -238,6 +233,15 @@ class DamageDetector:
 
         all_metrics = {}
         unique_ids = np.unique(labels)
+
+        valid_labels = [lbl for lbl in unique_ids if lbl >= 0]
+        label_to_color = {}
+        if len(valid_labels) > 0:
+            cmap = plt.get_cmap(cmap_name)
+            label_to_color = {
+                lab: cmap(i / max(len(valid_labels) - 1, 1))[:3]
+                for i, lab in enumerate(valid_labels)
+            }
 
         for id in unique_ids:
             if id == -1:
@@ -253,7 +257,7 @@ class DamageDetector:
             # 2. Shift coordinates to local origin for grid indexing
             # Assumption: The damage is roughly aligned to the XY plane.
             x_local = c_xyz[:, 0] - np.min(c_xyz[:, 0])
-            y_local = c_xyz[:, 2] - np.min(c_xyz[:, 2])
+            y_local = c_xyz[:, 1] - np.min(c_xyz[:, 1])
 
             # 3. Convert coordinates to integer grid indices
             x_idx = (x_local / grid_res).astype(int)
@@ -277,13 +281,75 @@ class DamageDetector:
             volume = float(np.sum(grid) * cell_area)
             max_depth = float(np.max(grid))
 
+            rgb = label_to_color.get(id, (0.0, 0.0, 0.0))
+            colour = self._get_closest_color_name(rgb)
+
             # Append to the master dictionary using the ID as the key
             # Cast the cluster_id to int as well if it originated from a NumPy array
             all_metrics[int(id)] = {
                 "projected_area": projected_area,
                 "volume": volume,
                 "max_depth": max_depth,
-                # "grid_matrix": grid,
+                "color": colour,
+                "color_rgb": rgb,
             }
 
+        print("\n===== Damage cluster metrics =====")
+        header = f"{'Cluster ID':<12}{'Area':<14}{'Volume':<14}{'Max Depth':<14}{'Color (R, G, B)':<20}"
+        print(header)
+        print("-" * len(header))
+
+        for cluster_id, data in sorted(all_metrics.items()):
+            area = f"{data['projected_area']:.6f}"
+            volume = f"{data['volume']:.6f}"
+            depth = f"{data['max_depth']:.6f}"
+
+            colour = data["color"]
+            r, g, b = data["color_rgb"]
+            color_str = f"{colour} ({r:.2f}, {g:.2f}, {b:.2f})"
+
+            print(f"{cluster_id:<12}{area:<14}{volume:<14}{depth:<14}{color_str:<20}")
+
         return all_metrics
+
+    def _get_closest_color_name(self, rgb):
+        """Finds the closest human-readable color name for an RGB tuple."""
+        # Standard colors mapped to RGB in the 0.0 - 1.0 range
+        named_colors = {
+            "Red": (1.0, 0.0, 0.0),
+            "Dark Red": (0.5, 0.0, 0.0),
+            "Green": (0.0, 0.5, 0.0),
+            "Lime": (0.0, 1.0, 0.0),
+            "Light Green": (0.6, 0.98, 0.6),
+            "Blue": (0.0, 0.0, 1.0),
+            "Navy": (0.0, 0.0, 0.5),
+            "Light Blue": (0.68, 0.85, 0.9),
+            "Yellow": (1.0, 1.0, 0.0),
+            "Gold": (1.0, 0.84, 0.0),
+            "Cyan": (0.0, 1.0, 1.0),
+            "Teal": (0.0, 0.5, 0.5),
+            "Magenta": (1.0, 0.0, 1.0),
+            "Purple": (0.5, 0.0, 0.5),
+            "Orange": (1.0, 0.65, 0.0),
+            "Dark Orange": (1.0, 0.55, 0.0),
+            "Pink": (1.0, 0.75, 0.8),
+            "Deep Pink": (1.0, 0.08, 0.58),
+            "Brown": (0.65, 0.16, 0.16),
+            "Maroon": (0.5, 0.0, 0.0),
+            "Gray": (0.5, 0.5, 0.5),
+            "Silver": (0.75, 0.75, 0.75),
+            "Black": (0.0, 0.0, 0.0),
+            "White": (1.0, 1.0, 1.0),
+        }
+
+        min_dist = float("inf")
+        closest_name = "Unknown"
+
+        for name, target_rgb in named_colors.items():
+            # Calculate squared Euclidean distance
+            dist = sum((a - b) ** 2 for a, b in zip(rgb, target_rgb))
+            if dist < min_dist:
+                min_dist = dist
+                closest_name = name
+
+        return closest_name

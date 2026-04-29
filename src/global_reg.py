@@ -146,8 +146,8 @@ class Registration:
         return result
 
     def icp(self, source, target, init_transform):
-        source = self.ensure_normals(copy.deepcopy(source))
-        target = self.ensure_normals(copy.deepcopy(target))
+        source = self.ensure_normals(source)
+        target = self.ensure_normals(target)
 
         result = o3d.pipelines.registration.registration_icp(
             source,
@@ -160,8 +160,8 @@ class Registration:
         return result
 
     def plane_icp(self, source, target, init_transform, K=10):
-        source = self.ensure_normals(copy.deepcopy(source))
-        target = self.ensure_normals(copy.deepcopy(target))
+        source = self.ensure_normals(source)
+        target = self.ensure_normals(target)
 
         # Downweights points with large residuals. Should reduce effect of damaged region on registration
         tukey_kernel = o3d.pipelines.registration.TukeyLoss(k=K)
@@ -179,8 +179,8 @@ class Registration:
         return result
 
     def gen_icp(self, source, target, init_transform):
-        source = self.ensure_normals(copy.deepcopy(source))
-        target = self.ensure_normals(copy.deepcopy(target))
+        source = self.ensure_normals(source)
+        target = self.ensure_normals(source)
 
         result = o3d.pipelines.registration.registration_generalized_icp(
             source,
@@ -228,10 +228,10 @@ class Registration:
 
     def register(self, source, target):
         ransac_result = self.get_initial_guess(source, target)
-        icp_result = self.icp(source, target, ransac_result.transformation)
+        icp_result = self.gen_icp(source, target, ransac_result.transformation)
 
-        evaluation = self.evaluate_alignment(source, target, icp_result.transformation)
-        print(evaluation)
+        # evaluation = self.evaluate_alignment(source, target, icp_result.transformation)
+        # print(evaluation)
         return icp_result, ransac_result
 
     def evaluate_alignment(self, source, target, transform):
@@ -305,6 +305,46 @@ class Registration:
                 "notes": f"Failed: {str(e)}",
             }
 
+    def benchmark_global_method(self, source, target):
+        start = time.perf_counter()
+
+        try:
+            # get_initial_guess handles downsampling, FPFH extraction, and RANSAC
+            result = self.get_initial_guess(source, target)
+            runtime_s = time.perf_counter() - start
+
+            # Evaluate the global alignment against the original dense point clouds
+            evaluation = self.evaluate_alignment(source, target, result.transformation)
+
+            return {
+                "method": "FPFH + RANSAC",
+                "success": True,
+                "fitness": evaluation.fitness,
+                "inlier_rmse": evaluation.inlier_rmse,
+                "runtime_s": runtime_s,
+                "transformation": result.transformation,
+                "result": result,
+                "evaluation": evaluation,
+                "threshold": self.ransac_distance_threshold,
+                "max_iter": self.ransac_max_iteration,
+                "notes": "",
+            }
+        except Exception as e:
+            runtime_s = time.perf_counter() - start
+            return {
+                "method": "FPFH + RANSAC",
+                "success": False,
+                "fitness": None,
+                "inlier_rmse": None,
+                "runtime_s": runtime_s,
+                "transformation": None,
+                "result": None,
+                "evaluation": None,
+                "threshold": self.ransac_distance_threshold,
+                "max_iter": self.ransac_max_iteration,
+                "notes": f"Failed: {str(e)}",
+            }
+
     def print_result_summary(self, results):
         ranked_results = self.rank_results(results)
 
@@ -332,3 +372,22 @@ class Registration:
 
             if item["notes"]:
                 print(f"      Notes: {item['notes']}")
+
+    def benchmark(self, src, tgt):
+        results = []
+
+        # 1. Benchmark RANSAC (Global)
+        global_benchmark = self.benchmark_global_method(src, tgt)
+        results.append(global_benchmark)
+
+        # Extract the initial guess for the local methods
+        init_guess = global_benchmark["transformation"]
+
+        # 2. Benchmark ICP variants (Local)
+        if global_benchmark["success"]:
+            results.append(self.benchmark_method(self.icp, src, tgt, init_guess))
+            results.append(self.benchmark_method(self.plane_icp, src, tgt, init_guess))
+            results.append(self.benchmark_method(self.gen_icp, src, tgt, init_guess))
+
+        # 3. Print the unified table
+        self.print_result_summary(results)
