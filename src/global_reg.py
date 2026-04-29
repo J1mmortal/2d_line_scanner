@@ -180,7 +180,7 @@ class Registration:
 
     def gen_icp(self, source, target, init_transform):
         source = self.ensure_normals(source)
-        target = self.ensure_normals(source)
+        target = self.ensure_normals(target)
 
         result = o3d.pipelines.registration.registration_generalized_icp(
             source,

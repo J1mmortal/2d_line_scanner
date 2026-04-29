@@ -2,13 +2,14 @@ import open3d as o3d
 import numpy as np
 import matplotlib.pyplot as plt
 import copy
+import warnings
 
 from scipy.spatial import cKDTree
 
 
 class DamageDetector:
-    def __init__(self, damage_sigma_threshold=3.0):
-        self.damage_sigma_threshold = damage_sigma_threshold
+    def __init__(self):
+        self.damage_sigma_threshold = None
 
     def downsample(self, pcd, voxel_ratio=0.008, normal_max_nn=30):
         bbox = pcd.get_axis_aligned_bounding_box()
@@ -30,17 +31,17 @@ class DamageDetector:
         )
         return pcd_down
 
-    def detect(self, aligned_source, target, sigma_thresh=3):
+    def detect(self, aligned_source, target, sigma_thresh=3, percentile=80):
         pcd_dist = aligned_source.compute_point_cloud_distance(target)
         distances = np.asarray(pcd_dist)
 
         mean, std, threshold = self.estimate_noise(
-            distances, percentile=80, sigma_thresh=sigma_thresh
+            distances, percentile=percentile, sigma_thresh=sigma_thresh
         )
 
         damage_mask = distances > threshold
 
-        return damage_mask, distances, pcd_dist
+        return damage_mask, distances
 
     def cluster(
         self, aligned_source, damage_mask, eps=2.0, min_samples=10
@@ -55,6 +56,17 @@ class DamageDetector:
         # Push damaged points into a temporary Open3D object
         damage_pcd = o3d.geometry.PointCloud()
         damage_pcd.points = o3d.utility.Vector3dVector(xyz_damage)
+
+        bbox = aligned_source.get_axis_aligned_bounding_box()
+        max_dim = np.max(bbox.get_extent())
+        if eps > max_dim * 0.1:
+            warnings.warn(
+                f"eps={eps} is large relative to cloud extent ({max_dim:.2f}). Check units."
+            )
+        if eps < max_dim * 0.001:
+            warnings.warn(
+                f"eps={eps} is small relative to cloud extent ({max_dim:.2f}). Check units."
+            )
 
         # Execute C++ optimized DBSCAN
         labels = np.asarray(
@@ -132,7 +144,7 @@ class DamageDetector:
 
         o3d.visualization.draw_geometries([self.downsample(pcd)])
 
-    def estimate_noise(self, distances, percentile=80, sigma_thresh=3):
+    def estimate_noise(self, distances, percentile, sigma_thresh):
         bulk_cutoff = np.percentile(distances, percentile)
         bulk_dists = distances[distances < bulk_cutoff]
 
