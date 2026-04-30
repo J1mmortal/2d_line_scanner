@@ -216,6 +216,7 @@ class DamageDetector:
         vmax = np.percentile(distances, 99)  # cap outliers
         norm = mcolors.Normalize(vmin=0, vmax=vmax)
         cmap = cm.get_cmap("RdYlBu_r")  # red = high distance = damage
+        # cmap = cm.get_cmap("turbo")
 
         # Map each point's distance to an RGB colour
         colors_rgb = cmap(norm(distances))[:, :3]  # shape (N, 3), drop alpha
