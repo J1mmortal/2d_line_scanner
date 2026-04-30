@@ -109,11 +109,11 @@ class Pipeline:
         self.reg.benchmark(self.src, self.tgt)
 
 
-# src = "../data/CC/SRC.ply"
-# tgt = "../data/CC/TGT.ply"
+# src = "../data/pcd/CC/SRC.ply"
+# tgt = "../data/pcd/CC/TGT.ply"
 
-src = "../data/Reg_block_tripledented_random.ply"
-tgt = "../data/Reg_block_2_random.ply"
+src = "../data/pcd/Reg_block_tripledented_random.ply"
+tgt = "../data/pcd/Reg_block_2_random.ply"
 
 pip = Pipeline(
     src,

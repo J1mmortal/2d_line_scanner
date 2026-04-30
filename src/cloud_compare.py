@@ -134,5 +134,5 @@ if __name__ == "__main__":
     compared_scan = r"C:\Users\fvsch\OneDrive\Documents\Code\TUDelft\Y3\BEP\2d_line_scanner\data\CC\sin_src_reg.ply"
 
     ccl = CloudCompare(compared_scan, reference_scan)
-    # run_c2c_pipeline(compared_scan, reference_scan, cc_executable)
+    ccl.run_c2c(reference_scan, compared_scan)
     ccl.run_m3c2(reference_scan, compared_scan)
