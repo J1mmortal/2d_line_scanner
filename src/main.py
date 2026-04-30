@@ -3,7 +3,7 @@ import numpy as np
 import copy
 import matplotlib.pyplot as plt
 
-from global_reg import Registration
+from registration import Registration
 from damage_detection import DamageDetector
 
 reg = Registration(voxel_size=2)
@@ -56,5 +56,3 @@ reg.print_result_summary(results)
 
 tf = results[3]["transformation"]
 reg.visualise_result(src, tgt, transform=tf, downsample=0.008)
-
-alg_src

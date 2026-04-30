@@ -1,7 +1,7 @@
 import copy
 import logging
 import open3d as o3d
-from global_reg import Registration
+from registration import Registration
 from damage_detection import DamageDetector
 
 log = logging.getLogger(__name__)
