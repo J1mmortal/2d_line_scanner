@@ -12,8 +12,8 @@ from damage_detection import DamageDetector
 class CloudCompare:
     def __init__(
         self,
-        comp_path,
-        ref_path,
+        comp_path: str,
+        ref_path: str,
         params_path="..\data\m3c2_params.txt",
         cc_path="C:\Program Files\CloudCompare\CloudCompare.exe",
         output_dir="../data/las",
@@ -203,7 +203,6 @@ class CloudCompare:
             matches.extend(self.output_dir.glob(p))
 
         last_file = max(matches, key=lambda p: p.stat().st_mtime)
-        print(last_file)
         return Path(last_file)
 
     def run_cc(self, C2C=False, M3C2=False):

@@ -3,6 +3,7 @@ import logging
 import open3d as o3d
 from registration import Registration
 from damage_detection import DamageDetector
+from cloud_compare import CloudCompare
 
 log = logging.getLogger(__name__)
 logging.basicConfig(
@@ -24,9 +25,14 @@ class Pipeline:
         min_fitness: float = 0.5,
         visualise: bool = True,
         benchmark=False,
+        cc=False,
+        c2c=True,
+        m3c2=False,
+        aligned_path="../data/CC/alg_source_CC.ply",
     ):
         self.reg = Registration(voxel_size)
         self.det = DamageDetector()
+        self.ccl = CloudCompare(comp_path=source_path, ref_path=target_path)
 
         self.sigma_thresh = sigma_thresh
         self.percentile = percentile
@@ -35,6 +41,11 @@ class Pipeline:
         self.min_fitness = min_fitness
         self.visualise = visualise
         self.benchmark = benchmark
+        self.cc = cc
+        self.c2c = c2c
+        self.m3c2 = m3c2
+
+        self.aligned_path = aligned_path
 
         self.src = self.reg.load_pcd(source_path)
         self.tgt = self.reg.load_pcd(target_path)
@@ -50,6 +61,7 @@ class Pipeline:
     def run(self):
         if self.benchmark:
             self._benchmark()
+
         self._register()
         self._detect()
         self._cluster()
@@ -70,14 +82,31 @@ class Pipeline:
         self.transformation = icp.transformation
         self.alg_src = copy.deepcopy(self.src).transform(self.transformation)
 
+        if self.visualise:
+            self.reg.visualise_result(self.src, self.tgt, self.transformation)
+
     def _detect(self):
         log.info("Running damage detection...")
-        self.mask, self.distances = self.det.detect(
-            self.alg_src,
-            self.tgt,
-            sigma_thresh=self.sigma_thresh,
-            percentile=self.percentile,
-        )
+
+        if self.cc:
+            log.info("Running CloudCompare backend")
+            o3d.io.write_point_cloud(self.aligned_path, self.alg_src)
+            _, self.distances = self.ccl.run_cc(C2C=self.c2c, M3C2=self.m3c2)
+            mean, std, threshold = self.det.estimate_noise(
+                self.distances,
+                percentile=self.percentile,
+                sigma_thresh=self.sigma_thresh,
+            )
+            self.mask = self.distances > threshold
+
+        else:
+            self.mask, self.distances = self.det.detect(
+                self.alg_src,
+                self.tgt,
+                sigma_thresh=self.sigma_thresh,
+                percentile=self.percentile,
+            )
+
         log.info("Damage points: %d / %d", self.mask.sum(), len(self.mask))
 
         if self.visualise:
@@ -109,16 +138,16 @@ class Pipeline:
         self.reg.benchmark(self.src, self.tgt)
 
 
-# src = "../data/pcd/CC/SRC.ply"
-# tgt = "../data/pcd/CC/TGT.ply"
+src = "../data/CC/SRC.ply"
+tgt = "../data/CC/TGT.ply"
 
-src = "../data/pcd/Reg_block_tripledented_random.ply"
-tgt = "../data/pcd/Reg_block_2_random.ply"
+# src = "../data/pcd/Reg_block_tripledented_random.ply"
+# tgt = "../data/pcd/Reg_block_2_random.ply"
 
 pip = Pipeline(
     src,
     tgt,
-    voxel_size=2.0,
+    voxel_size=3.0,
     sigma_thresh=3.0,
     percentile=90.0,
     cluster_eps=2.0,
@@ -126,5 +155,9 @@ pip = Pipeline(
     min_fitness=0.5,
     visualise=True,
     benchmark=False,
+    cc=False,
+    c2c=True,
+    m3c2=False,
+    aligned_path="../data/CC/alg_source_CC.ply",
 )
 pip.run()
