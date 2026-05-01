@@ -52,9 +52,9 @@ class Registration:
             )
         return pcd
 
-    def simple_convert(self, file):
-        if file is not None:
-            mesh = o3d.io.read_triangle_mesh(file)
+    def simple_convert(self, file_path):
+        if file_path is not None:
+            mesh = o3d.io.read_triangle_mesh(file_path)
             mesh.compute_vertex_normals()
 
             self.pcd.points = mesh.vertices
@@ -243,21 +243,34 @@ class Registration:
         )
 
     def visualise_result(
-        self, source, target, transform=np.eye(4), downsample=0.008
+        self, source, target=None, transform=np.eye(4), downsample=0.008
     ):  # Downsample sets voxel size: =1 gives one voxel for the whole point cloud
-        src_d = self.downsample(source, ratio=downsample)
-        tgt_d = self.downsample(target, ratio=downsample)
+        if target is not None:
+            src_d = self.downsample(source, ratio=downsample)
+            tgt_d = self.downsample(target, ratio=downsample)
 
-        src_d.paint_uniform_color([1, 0.2, 0])
-        tgt_d.paint_uniform_color([0, 0.65, 0.93])
+            src_d.paint_uniform_color([1, 0.2, 0])
+            tgt_d.paint_uniform_color([0, 0.65, 0.93])
 
-        src_d.transform(transform)
+            src_d.transform(transform)
 
-        title = f"Alignment after transformation with {transform}"
+            title = f"Alignment after transformation with {transform}"
 
-        o3d.visualization.draw_geometries(
-            [src_d, tgt_d], window_name=title, width=1000, height=800
-        )
+            o3d.visualization.draw_geometries(
+                [src_d, tgt_d], window_name=title, width=1000, height=800
+            )
+        else:
+            src_d = self.downsample(source, ratio=downsample)
+
+            src_d.paint_uniform_color([1, 0.2, 0])
+
+            src_d.transform(transform)
+
+            title = f"Point cloud visualisation {transform}"
+
+            o3d.visualization.draw_geometries(
+                [src_d], window_name=title, width=1000, height=800
+            )
 
     def rank_results(self, results):
         successful = [r for r in results if r.get("success", False)]
