@@ -4,9 +4,8 @@ import matplotlib.pyplot as plt
 import copy
 import warnings
 
-from scipy.spatial import cKDTree
-from scipy.spatial import ConvexHull
-from scipy.signal import medfilt
+from scipy.spatial import ConvexHull, cKDTree
+from scipy.signal import medfilt, wiener
 
 
 class DamageDetector:
@@ -48,9 +47,10 @@ class DamageDetector:
             distances, percentile=percentile, sigma_thresh=sigma_thresh
         )
 
-        # Median filter to smooth noise
+        # Median (or wiener) filter to smooth noise
         if median_filter_kernel is not None:
             distances = medfilt(distances, median_filter_kernel)
+            # distances = wiener(distances, median_filter_kernel)
 
         damage_mask = distances > threshold
 

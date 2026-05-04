@@ -87,6 +87,13 @@ class Registration:
         )
         return pcd_down
 
+    def SOR(self, pcd, neigbours, std_ratio):
+        filtered_cloud, ind = pcd.remove_statistical_outlier(
+            nb_neighbors=neigbours, std_ratio=std_ratio
+        )
+
+        return filtered_cloud, ind
+
     def downsample(self, pcd, ratio):
         bbox = pcd.get_axis_aligned_bounding_box()
         extent = bbox.get_extent()
