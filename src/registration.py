@@ -30,7 +30,7 @@ class Registration:
         # Convergence criteria
         self.relative_fitness = 1e-6
         self.relative_rmse = 1e-6
-        self.max_iteration = 100
+        self.max_iteration = 150
 
         self.criteria = o3d.pipelines.registration.ICPConvergenceCriteria(
             relative_fitness=self.relative_fitness,

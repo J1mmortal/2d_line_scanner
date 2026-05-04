@@ -5,6 +5,8 @@ import copy
 import warnings
 
 from scipy.spatial import cKDTree
+from scipy.spatial import ConvexHull
+from scipy.signal import medfilt
 
 
 class DamageDetector:
@@ -31,13 +33,24 @@ class DamageDetector:
         )
         return pcd_down
 
-    def detect(self, aligned_source, target, sigma_thresh=3, percentile=80):
+    def detect(
+        self,
+        aligned_source,
+        target,
+        sigma_thresh=3,
+        percentile=80,
+        median_filter_kernel=None,
+    ):
         pcd_dist = aligned_source.compute_point_cloud_distance(target)
         distances = np.asarray(pcd_dist)
 
         mean, std, threshold = self.estimate_noise(
             distances, percentile=percentile, sigma_thresh=sigma_thresh
         )
+
+        # Median filter to smooth noise
+        if median_filter_kernel is not None:
+            distances = medfilt(distances, median_filter_kernel)
 
         damage_mask = distances > threshold
 
@@ -68,7 +81,6 @@ class DamageDetector:
                 f"eps={eps} is small relative to cloud extent ({max_dim:.2f}). Check units."
             )
 
-        # Execute C++ optimized DBSCAN
         labels = np.asarray(
             damage_pcd.cluster_dbscan(
                 eps=eps, min_points=min_samples, print_progress=True
@@ -117,32 +129,6 @@ class DamageDetector:
         full_labels[damage_mask] = labels_dense
 
         return full_labels
-
-    def color_point_cloud_by_labels(
-        self, aligned_source, labels, noise_color=(0.5, 0.5, 0.5), cmap_name="tab20"
-    ):
-        xyz = np.asarray(aligned_source.points)
-        labels = np.asarray(labels)
-
-        pcd = o3d.geometry.PointCloud()
-        pcd.points = o3d.utility.Vector3dVector(xyz)
-
-        colors = np.zeros((len(labels), 3), dtype=float)
-        unique_labels = np.unique(labels[labels >= 0])
-
-        if len(unique_labels) > 0:
-            cmap = plt.get_cmap(cmap_name)
-            label_to_color = {
-                lab: cmap(i / max(len(unique_labels) - 1, 1))[:3]
-                for i, lab in enumerate(unique_labels)
-            }
-            for lab, col in label_to_color.items():
-                colors[labels == lab] = col
-
-        colors[labels == -1] = noise_color
-        pcd.colors = o3d.utility.Vector3dVector(colors)
-
-        o3d.visualization.draw_geometries([self.downsample(pcd)])
 
     def estimate_noise(self, distances, percentile, sigma_thresh):
         bulk_cutoff = np.percentile(distances, percentile)
@@ -204,8 +190,8 @@ class DamageDetector:
         o3d.visualization.draw_geometries(
             [pcd],
             window_name="Binary Damage Mask 3D",
-            width=1200,
-            height=800,
+            width=1600,
+            height=1000,
         )
 
     def visualise_colourmap(self, pcd, distances):
@@ -228,9 +214,40 @@ class DamageDetector:
         pcd = self.downsample(vis_pcd)
         o3d.visualization.draw_geometries(
             [pcd],
-            window_name="C2C Damage Heatmap",
-            width=1200,
-            height=800,
+            window_name="Damage Heatmap",
+            width=1600,
+            height=1000,
+        )
+
+    def color_point_cloud_by_labels(
+        self, aligned_source, labels, noise_color=(0.5, 0.5, 0.5), cmap_name="tab20"
+    ):
+        xyz = np.asarray(aligned_source.points)
+        labels = np.asarray(labels)
+
+        pcd = o3d.geometry.PointCloud()
+        pcd.points = o3d.utility.Vector3dVector(xyz)
+
+        colors = np.zeros((len(labels), 3), dtype=float)
+        unique_labels = np.unique(labels[labels >= 0])
+
+        if len(unique_labels) > 0:
+            cmap = plt.get_cmap(cmap_name)
+            label_to_color = {
+                lab: cmap(i / max(len(unique_labels) - 1, 1))[:3]
+                for i, lab in enumerate(unique_labels)
+            }
+            for lab, col in label_to_color.items():
+                colors[labels == lab] = col
+
+        colors[labels == -1] = noise_color
+        pcd.colors = o3d.utility.Vector3dVector(colors)
+
+        o3d.visualization.draw_geometries(
+            [self.downsample(pcd)],
+            window_name=f"Damage clustered into {len(set(labels))-1} regions",
+            width=1600,
+            height=1000,
         )
 
     # Need to correctly pass the damage plane as coming from the scanner
@@ -262,66 +279,70 @@ class DamageDetector:
 
             mask = labels == id
             c_xyz = xyz[mask]
-            c_dist = np.abs(distances[mask])  # Ensure distances are positive magnitudes
+            c_dist = np.abs(distances[mask])
 
-            if len(c_xyz) == 0:
-                raise ValueError(f"Cluster {id} contains no points.")
+            if len(c_xyz) < 3:
+                continue  # Cannot compute 2D area with < 3 points
 
-            # 2. Shift coordinates to local origin for grid indexing
-            # Assumption: The damage is roughly aligned to the XY plane.
-            x_local = c_xyz[:, 0] - np.min(c_xyz[:, 0])
-            y_local = c_xyz[:, 1] - np.min(c_xyz[:, 1])
+            # 1. PCA to find the local plane of the damage
+            mean = np.mean(c_xyz, axis=0)
+            centered = c_xyz - mean
+            cov = np.cov(centered.T)
+            evals, evecs = np.linalg.eigh(cov)
 
-            # 3. Convert coordinates to integer grid indices
-            x_idx = (x_local / grid_res).astype(int)
-            y_idx = (y_local / grid_res).astype(int)
+            # evecs[:, 0] is the normal (smallest variance).
+            # evecs[:, 1:] define the flat 2D plane.
+            local_2d = centered @ evecs[:, 1:]
 
-            # 4. Initialize the 2D raster grid
-            max_x, max_y = np.max(x_idx), np.max(y_idx)
-            grid = np.zeros((max_x + 1, max_y + 1))
+            # 2. Compute exact area using Convex Hull (ignores point density)
+            try:
+                hull = ConvexHull(local_2d)
+                projected_area = float(
+                    hull.volume
+                )  # In 2D, scipy hull.volume is the area
+                perimeter = float(hull.area)
+            except Exception as e:
+                Warning(f"Convex hull failed for cluster {id}: {e}")
+                projected_area = 0.0
+                perimeter = 0.0
 
-            # 5. Populate the grid.
-            # If multiple laser points fall in the same cell, we take the maximum damage depth.
-            np.maximum.at(grid, (x_idx, y_idx), c_dist)
-
-            # --- METRIC CALCULATIONS ---
-
-            # Calculate metrics and cast to native Python types
-            cell_area = float(grid_res**2)
-            active_cells = int(np.count_nonzero(grid))
-
-            projected_area = float(active_cells * cell_area)
-            volume = float(np.sum(grid) * cell_area)
-            max_depth = float(np.max(grid))
+            # 3. Max depth and estimated volume
+            max_depth = float(np.max(c_dist))
+            avg_depth = float(np.mean(c_dist))
+            volume = projected_area * avg_depth  # Approximated cylinder/prism volume
 
             rgb = label_to_color.get(id, (0.0, 0.0, 0.0))
             colour = self._get_closest_color_name(rgb)
 
-            # Append to the master dictionary using the ID as the key
-            # Cast the cluster_id to int as well if it originated from a NumPy array
             all_metrics[int(id)] = {
                 "projected_area": projected_area,
                 "volume": volume,
+                "perimeter": perimeter,
                 "max_depth": max_depth,
                 "color": colour,
                 "color_rgb": rgb,
             }
 
-        print("\n===== Damage cluster metrics =====")
-        header = f"{'Cluster ID':<12}{'Area':<14}{'Volume':<14}{'Max Depth':<14}{'Color (R, G, B)':<20}"
+        print(
+            "\n============================== Damage cluster metrics ================================="
+        )
+        header = f"{'Cluster ID':<12}{'Area':<14}{'Volume':<14}{'Perimeter':<14}{'Max Depth':<14}{'Color (R, G, B)':<20}"
         print(header)
         print("-" * len(header))
 
         for cluster_id, data in sorted(all_metrics.items()):
             area = f"{data['projected_area']:.6f}"
             volume = f"{data['volume']:.6f}"
+            perimeter = f"{data['perimeter']:.6f}"
             depth = f"{data['max_depth']:.6f}"
 
             colour = data["color"]
             r, g, b = data["color_rgb"]
             color_str = f"{colour} ({r:.2f}, {g:.2f}, {b:.2f})"
 
-            print(f"{cluster_id:<12}{area:<14}{volume:<14}{depth:<14}{color_str:<20}")
+            print(
+                f"{cluster_id:<12}{area:<14}{volume:<14}{perimeter:<14}{depth:<14}{color_str:<20}"
+            )
 
         return all_metrics
 

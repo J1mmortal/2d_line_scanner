@@ -20,8 +20,10 @@ class Pipeline:
         voxel_size: float = 2.0,
         sigma_thresh: float = 3.0,
         percentile: float = 80.0,
+        median_filter_kernel=None,
         cluster_eps: float = 2.0,
         cluster_min_samples: int = 10,
+        fast_cluster: bool = False,
         min_fitness: float = 0.5,
         visualise: bool = True,
         benchmark=False,
@@ -29,6 +31,7 @@ class Pipeline:
         c2c=True,
         m3c2=False,
         aligned_path="../data/CC/alg_source_CC.ply",
+        skip_reg=False,
     ):
         self.reg = Registration(voxel_size)
         self.det = DamageDetector()
@@ -36,14 +39,17 @@ class Pipeline:
 
         self.sigma_thresh = sigma_thresh
         self.percentile = percentile
+        self.median_filter_kernel = median_filter_kernel
         self.cluster_eps = cluster_eps
         self.cluster_min_samples = cluster_min_samples
+        self.fast_cluster = fast_cluster
         self.min_fitness = min_fitness
         self.visualise = visualise
         self.benchmark = benchmark
         self.cc = cc
         self.c2c = c2c
         self.m3c2 = m3c2
+        self.skip_reg = skip_reg
 
         self.aligned_path = aligned_path
 
@@ -59,13 +65,21 @@ class Pipeline:
         self.metrics = None
 
     def run(self):
+        # self.reg.set_voxel(self.tgt)
+
         if self.benchmark:
             self._benchmark()
 
-        self._register()
-        self._detect()
-        self._cluster()
-        self._compute_metrics()
+        if not self.skip_reg:
+            self._register()
+            self._detect()
+            self._cluster()
+            self._compute_metrics()
+        else:
+            self.alg_src = self.reg.load_pcd(self.aligned_path)
+            self._detect()
+            self._cluster()
+            self._compute_metrics()
         return self.metrics
 
     def _register(self):
@@ -91,6 +105,8 @@ class Pipeline:
         if self.cc:
             log.info("Running CloudCompare backend")
             o3d.io.write_point_cloud(self.aligned_path, self.alg_src)
+            self.ccl.comp_path = self.aligned_path
+
             _, self.distances = self.ccl.run_cc(C2C=self.c2c, M3C2=self.m3c2)
             mean, std, threshold = self.det.estimate_noise(
                 self.distances,
@@ -105,6 +121,7 @@ class Pipeline:
                 self.tgt,
                 sigma_thresh=self.sigma_thresh,
                 percentile=self.percentile,
+                median_filter_kernel=self.median_filter_kernel,
             )
 
         log.info("Damage points: %d / %d", self.mask.sum(), len(self.mask))
@@ -114,13 +131,22 @@ class Pipeline:
             self.det.visualise_binary(self.alg_src, self.mask)
 
     def _cluster(self):
-        log.info("Clustering damage regions...")
-        self.labels = self.det.cluster(
-            self.alg_src,
-            self.mask,
-            eps=self.cluster_eps,
-            min_samples=self.cluster_min_samples,
-        )
+        log.info(f"Clustering damage regions (Fast cluster: {self.fast_cluster})...")
+        if not self.fast_cluster:
+            self.labels = self.det.cluster(
+                self.alg_src,
+                self.mask,
+                eps=self.cluster_eps,
+                min_samples=self.cluster_min_samples,
+            )
+        else:
+            self.labels = self.det.cluster_fast(
+                self.alg_src,
+                self.mask,
+                voxel_size=self.reg.voxel,
+                eps=self.cluster_eps,
+                min_samples=self.cluster_min_samples,
+            )
         n_clusters = len(set(self.labels[self.labels >= 0]))
         log.info("Found %d damage cluster(s)", n_clusters)
 
@@ -130,7 +156,7 @@ class Pipeline:
     def _compute_metrics(self):
         log.info("Computing damage metrics...")
         self.metrics = self.det.calculate_damage_metrics(
-            self.alg_src, self.distances, self.labels
+            self.alg_src, self.distances, self.labels, grid_res=0.1
         )
 
     def _benchmark(self):
@@ -138,8 +164,11 @@ class Pipeline:
         self.reg.benchmark(self.src, self.tgt)
 
 
-src = "../data/CC/SRC.ply"
-tgt = "../data/CC/TGT.ply"
+# src = "../data/CC/SRC.ply"
+# tgt = "../data/CC/TGT.ply"
+
+src = "../data/test_block_damaged_cleaned.ply"
+tgt = "../data/test_block_cleaned.ply"
 
 # src = "../data/pcd/Reg_block_tripledented_random.ply"
 # tgt = "../data/pcd/Reg_block_2_random.ply"
@@ -147,17 +176,20 @@ tgt = "../data/CC/TGT.ply"
 pip = Pipeline(
     src,
     tgt,
-    voxel_size=3.0,
+    voxel_size=1,
     sigma_thresh=3.0,
-    percentile=90.0,
-    cluster_eps=2.0,
-    cluster_min_samples=20,
-    min_fitness=0.5,
+    percentile=95,
+    median_filter_kernel=None,
+    cluster_eps=3.0,
+    cluster_min_samples=1000,
+    fast_cluster=False,
+    min_fitness=0.9,
     visualise=True,
     benchmark=False,
     cc=False,
-    c2c=True,
-    m3c2=False,
+    c2c=False,
+    m3c2=True,
     aligned_path="../data/CC/alg_source_CC.ply",
+    skip_reg=True,
 )
 pip.run()

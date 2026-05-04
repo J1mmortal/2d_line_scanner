@@ -6,17 +6,15 @@ import numpy as np
 import matplotlib.pyplot as plt
 import shutil
 
-from damage_detection import DamageDetector
-
 
 class CloudCompare:
     def __init__(
         self,
         comp_path: str,
         ref_path: str,
-        params_path="..\data\m3c2_params.txt",
-        cc_path="C:\Program Files\CloudCompare\CloudCompare.exe",
-        output_dir="../data/las",
+        params_path=r"..\data\m3c2_params_test_block.txt",
+        cc_path=r"C:\Program Files\CloudCompare\CloudCompare.exe",
+        output_dir=r"../data/las",
     ):
         self.cc_path = cc_path
         self.comp_path = comp_path
@@ -218,18 +216,3 @@ class CloudCompare:
         pcd, dist = self.read_las_data(last_las)
 
         return pcd, dist
-
-
-# ---------------------------------------------------------
-# Execution Example
-# ---------------------------------------------------------
-if __name__ == "__main__":
-
-    reference_path = r"..\data\CC\sin_tgt.ply"
-    compared_path = r"..\data\CC\sin_src_reg.ply"
-
-    ccl = CloudCompare(compared_path, reference_path)
-    # ccl.run_c2c()
-    ccl.run_m3c2(overwrite=False)
-    las = ccl.find_last_las()
-    pcd, dist = ccl.read_las_data(las)
