@@ -17,6 +17,8 @@ class Pipeline:
         self,
         source_path: str,
         target_path: str,
+        sor_neighbours: int = None,
+        sor_std: float = 1.0,
         voxel_size: float = 2.0,
         sigma_thresh: float = 3.0,
         percentile: float = 80.0,
@@ -37,6 +39,9 @@ class Pipeline:
         self.det = DamageDetector()
         self.ccl = CloudCompare(comp_path=source_path, ref_path=target_path)
 
+        self.sor_neighbours = sor_neighbours
+        self.sor_std = sor_std
+
         self.sigma_thresh = sigma_thresh
         self.percentile = percentile
         self.median_filter_kernel = median_filter_kernel
@@ -55,6 +60,9 @@ class Pipeline:
 
         self.src = self.reg.load_pcd(source_path)
         self.tgt = self.reg.load_pcd(target_path)
+        if self.sor_neighbours is not None:
+            self.src = self.reg.SOR(self.src, self.sor_neighbours, self.sor_std)
+            self.tgt = self.reg.SOR(self.tgt, self.sor_neighbours, self.sor_std)
 
         # Results populated by run()
         self.alg_src = None
@@ -101,10 +109,9 @@ class Pipeline:
 
     def _detect(self):
         log.info("Running damage detection...")
-
+        o3d.io.write_point_cloud(self.aligned_path, self.alg_src)
         if self.cc:
             log.info("Running CloudCompare backend")
-            o3d.io.write_point_cloud(self.aligned_path, self.alg_src)
             self.ccl.comp_path = self.aligned_path
 
             _, self.distances = self.ccl.run_cc(C2C=self.c2c, M3C2=self.m3c2)
@@ -167,21 +174,23 @@ class Pipeline:
 # src = "../data/CC/SRC.ply"
 # tgt = "../data/CC/TGT.ply"
 
-src = "../data/test_block_damaged_cleaned.ply"
-tgt = "../data/test_block_cleaned.ply"
+# src = "../data/test_block_damaged_cleaned.ply"
+# tgt = "../data/test_block_cleaned.ply"
 
-# src = "../data/pcd/Reg_block_tripledented_random.ply"
-# tgt = "../data/pcd/Reg_block_2_random.ply"
+src = "../data/block_damage_accel.ply"
+tgt = "../data/block.ply"
 
 pip = Pipeline(
     src,
     tgt,
+    sor_neighbours=None,
+    sor_std=1.0,
     voxel_size=1,
     sigma_thresh=3.0,
     percentile=95,
-    median_filter_kernel=33,
-    cluster_eps=3.0,
-    cluster_min_samples=1000,
+    median_filter_kernel=21,
+    cluster_eps=2.5,
+    cluster_min_samples=600,
     fast_cluster=False,
     min_fitness=0.9,
     visualise=True,
