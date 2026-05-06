@@ -100,12 +100,12 @@ class Pipeline:
 
     def _register(self):
         log.info("Starting registration...")
-        icp, _ = self.reg.register(self.src, self.tgt)
-        log.info("ICP fitness: %.4f  RMSE: %.6f", icp.fitness, icp.inlier_rmse)
+        icp, _, eval = self.reg.register(self.src, self.tgt)
+        log.info("ICP fitness: %.4f  RMSE: %.6f", eval.fitness, eval.inlier_rmse)
 
-        if icp.fitness < self.min_fitness:
+        if eval.fitness < self.min_fitness:
             raise RuntimeError(
-                f"Registration fitness {icp.fitness:.3f} is below threshold "
+                f"Registration fitness {eval.fitness:.3f} is below threshold "
                 f"{self.min_fitness}. Check inputs or voxel size."
             )
 
@@ -193,7 +193,7 @@ tgt = "../data/block/block_angle.ply"
 pip = Pipeline(
     src,
     tgt,
-    use_tensor=True,
+    use_tensor=False,
     sor_neighbours=None,
     sor_std=2.0,
     voxel_size=1,
@@ -204,8 +204,8 @@ pip = Pipeline(
     cluster_min_samples=600,
     fast_cluster=False,
     min_fitness=0.825,
-    visualise=True,
-    benchmark=True,
+    visualise=False,
+    benchmark=False,
     cc=False,
     c2c=False,
     m3c2=True,

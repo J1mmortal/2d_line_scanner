@@ -197,20 +197,6 @@ class Registration:
         )
         return result
 
-    # def icp(self, source, target, init_transform):
-    #     source = self.ensure_normals(source)
-    #     target = self.ensure_normals(target)
-
-    #     result = o3d.pipelines.registration.registration_icp(
-    #         source,
-    #         target,
-    #         max_correspondence_distance=self.max_correspondence_distance,
-    #         init=init_transform,
-    #         estimation_method=o3d.pipelines.registration.TransformationEstimationPointToPoint(),
-    #         criteria=self.criteria,
-    #     )
-    #     return result
-
     def icp(self, source, target, init_transform):
         source = self.ensure_normals(source)
         target = self.ensure_normals(target)
@@ -246,25 +232,6 @@ class Registration:
                 estimation,
                 self.criteria,
             )
-
-    # def plane_icp(self, source, target, init_transform, K=10):
-    #     source = self.ensure_normals(source)
-    #     target = self.ensure_normals(target)
-
-    #     # Downweights points with large residuals. Should reduce effect of damaged region on registration
-    #     tukey_kernel = o3d.pipelines.registration.TukeyLoss(k=K)
-
-    #     result = o3d.pipelines.registration.registration_icp(
-    #         source,
-    #         target,
-    #         max_correspondence_distance=self.max_correspondence_distance,
-    #         init=init_transform,
-    #         estimation_method=o3d.pipelines.registration.TransformationEstimationPointToPlane(
-    #             tukey_kernel
-    #         ),
-    #         criteria=self.criteria,
-    #     )
-    #     return result
 
     def plane_icp(self, source, target, init_transform, K=10):
         source = self.ensure_normals(source)
@@ -348,19 +315,15 @@ class Registration:
         estimation = o3d.t.pipelines.registration.TransformationEstimationPointToPlane()
 
         # Coarse-to-fine parameter configuration
-        voxel_sizes = o3d.utility.DoubleVector(
-            [self.voxel * 4, self.voxel * 2, self.voxel, self.voxel / 2]
-        )
+        voxel_sizes = o3d.utility.DoubleVector([self.voxel, self.voxel / 4])
         max_corrs = o3d.utility.DoubleVector(
             [
-                self.max_correspondence_distance * 4,
                 self.max_correspondence_distance * 2,
                 self.max_correspondence_distance,
-                self.max_correspondence_distance / 2,
             ]
         )
 
-        max_iter = o3d.utility.IntVector([50, 30, 14])
+        max_iter = o3d.utility.IntVector([30, self.max_iteration])
         criteria_list = [
             o3d.t.pipelines.registration.ICPConvergenceCriteria(
                 self.relative_fitness, self.relative_rmse, it
@@ -394,11 +357,30 @@ class Registration:
 
         return ransac_result
 
-    def register(self, source, target):
-        ransac_result = self.get_initial_guess(source, target)
-        icp_result = self.gen_icp(source, target, ransac_result.transformation)
+    def register(self, source, target, method=None, ransac_retries=5, log=True):
+        method = method or self.multi_scale_icp
 
-        return icp_result, ransac_result
+        best_ransac = None
+
+        for attempt in range(ransac_retries):
+            ransac_result = self.get_initial_guess(source, target)
+            if log:
+                logging.info(
+                    "Attempt %d/%d — fitness: %.4f  RMSE: %.6f",
+                    attempt + 1,
+                    ransac_retries,
+                    ransac_result.fitness,
+                    ransac_result.inlier_rmse,
+                )
+
+            if best_ransac is None or ransac_result.fitness > best_ransac.fitness:
+                best_ransac = ransac_result
+        icp_result = method(source, target, best_ransac.transformation)
+
+        # Use the same evaluation path as benchmark for consistent fitness numbers
+        evaluation = self.evaluate_alignment(source, target, icp_result.transformation)
+
+        return icp_result, ransac_result, evaluation
 
     def evaluate_alignment(self, source, target, transform):
         return o3d.pipelines.registration.evaluate_registration(
