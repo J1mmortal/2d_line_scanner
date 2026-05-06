@@ -1,17 +1,27 @@
 import open3d as o3d
+import open3d.core as o3c
 import numpy as np
 import copy
 import time
+import logging
 
 
 class Registration:
-    def __init__(self, voxel_size=0.05, use_gpu = False):
-
+    def __init__(self, voxel_size=0.05, use_tensor=False):
         self.voxel = voxel_size
-        self.use_gpu = self
+
+        if use_tensor and not o3c.cuda.is_available():
+            logging.warning(
+                "use_tensor requested but CUDA is not available. Falling back to legacy CPU implementation"
+            )
+            use_tensor = False
+
+        self.use_tensor = use_tensor
+        self.device = o3c.Device("CUDA:0") if use_tensor else o3c.Device("CPU:0")
+        self.float_dtype = o3c.float32
 
         # ICP correspondance distances
-        self.max_correspondence_distance = self.voxel * 0.6
+        self.max_correspondence_distance = self.voxel * 0.4
 
         # For estimating normals
         self.normal_radius = self.voxel * 2
@@ -39,9 +49,34 @@ class Registration:
             max_iteration=self.max_iteration,
         )
 
+        # class _LegacyCompatibleResult:
+        #     """Helper to cast Tensor API results back to standard NumPy/Legacy formats"""
+
+        #     def __init__(self, tensor_result):
+        #         # Transformation must be float64 for o3d legacy transform()
+        #         self.transformation = (
+        #             tensor_result.transformation.cpu().numpy().astype(np.float64)
+        #         )
+        #         self.fitness = tensor_result.fitness
+        #         self.inlier_rmse = tensor_result.inlier_rmse
+
     def load_pcd(self, file_path):
         pcd = o3d.io.read_point_cloud(file_path)
         return pcd
+
+    def _format_tensor_result(self, tensor_result):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(
+            transformation=tensor_result.transformation.cpu()
+            .numpy()
+            .astype(np.float64),
+            fitness=tensor_result.fitness,
+            inlier_rmse=tensor_result.inlier_rmse,
+        )
+
+    def _to_init_tensor(self, transform: np.ndarray) -> "o3d.core.Tensor":
+        return o3c.Tensor(transform, dtype=o3c.float64)
 
     def ensure_normals(self, pcd):
         if not pcd.has_normals():
@@ -162,40 +197,130 @@ class Registration:
         )
         return result
 
+    # def icp(self, source, target, init_transform):
+    #     source = self.ensure_normals(source)
+    #     target = self.ensure_normals(target)
+
+    #     result = o3d.pipelines.registration.registration_icp(
+    #         source,
+    #         target,
+    #         max_correspondence_distance=self.max_correspondence_distance,
+    #         init=init_transform,
+    #         estimation_method=o3d.pipelines.registration.TransformationEstimationPointToPoint(),
+    #         criteria=self.criteria,
+    #     )
+    #     return result
+
     def icp(self, source, target, init_transform):
         source = self.ensure_normals(source)
         target = self.ensure_normals(target)
 
-        result = o3d.pipelines.registration.registration_icp(
-            source,
-            target,
-            max_correspondence_distance=self.max_correspondence_distance,
-            init=init_transform,
-            estimation_method=o3d.pipelines.registration.TransformationEstimationPointToPoint(),
-            criteria=self.criteria,
-        )
-        return result
+        if self.use_tensor:  # only True now if CUDA is actually available
+            t_src = o3d.t.geometry.PointCloud.from_legacy(
+                source, self.float_dtype, self.device
+            )
+            t_tgt = o3d.t.geometry.PointCloud.from_legacy(
+                target, self.float_dtype, self.device
+            )
+            init = self._o3c.Tensor(init_transform, dtype=self._o3c.float64)
+            result = o3d.t.pipelines.registration.icp(
+                t_src,
+                t_tgt,
+                self.max_correspondence_distance,
+                init,
+                o3d.t.pipelines.registration.TransformationEstimationPointToPoint(),
+                o3d.t.pipelines.registration.ICPConvergenceCriteria(
+                    self.relative_fitness, self.relative_rmse, self.max_iteration
+                ),
+            )
+            return self._format_tensor_result(result)
+        else:
+            estimation = (
+                o3d.pipelines.registration.TransformationEstimationPointToPoint()
+            )
+            return o3d.pipelines.registration.registration_icp(
+                source,
+                target,
+                self.max_correspondence_distance,
+                init_transform,
+                estimation,
+                self.criteria,
+            )
+
+    # def plane_icp(self, source, target, init_transform, K=10):
+    #     source = self.ensure_normals(source)
+    #     target = self.ensure_normals(target)
+
+    #     # Downweights points with large residuals. Should reduce effect of damaged region on registration
+    #     tukey_kernel = o3d.pipelines.registration.TukeyLoss(k=K)
+
+    #     result = o3d.pipelines.registration.registration_icp(
+    #         source,
+    #         target,
+    #         max_correspondence_distance=self.max_correspondence_distance,
+    #         init=init_transform,
+    #         estimation_method=o3d.pipelines.registration.TransformationEstimationPointToPlane(
+    #             tukey_kernel
+    #         ),
+    #         criteria=self.criteria,
+    #     )
+    #     return result
 
     def plane_icp(self, source, target, init_transform, K=10):
         source = self.ensure_normals(source)
         target = self.ensure_normals(target)
 
-        # Downweights points with large residuals. Should reduce effect of damaged region on registration
-        tukey_kernel = o3d.pipelines.registration.TukeyLoss(k=K)
+        if self.use_tensor:
+            t_src = o3d.t.geometry.PointCloud.from_legacy(
+                source, self.float_dtype, self.device
+            )
+            t_tgt = o3d.t.geometry.PointCloud.from_legacy(
+                target, self.float_dtype, self.device
+            )
 
-        result = o3d.pipelines.registration.registration_icp(
-            source,
-            target,
-            max_correspondence_distance=self.max_correspondence_distance,
-            init=init_transform,
-            estimation_method=o3d.pipelines.registration.TransformationEstimationPointToPlane(
-                tukey_kernel
-            ),
-            criteria=self.criteria,
-        )
-        return result
+            kernel = o3d.t.pipelines.registration.robust_kernel.RobustKernel(
+                o3d.t.pipelines.registration.robust_kernel.RobustKernelMethod.TukeyLoss,
+                K,
+            )
+            estimation = (
+                o3d.t.pipelines.registration.TransformationEstimationPointToPlane(
+                    kernel
+                )
+            )
+            criteria = o3d.t.pipelines.registration.ICPConvergenceCriteria(
+                self.relative_fitness, self.relative_rmse, self.max_iteration
+            )
+
+            init_tensor = self._to_init_tensor(init_transform)
+            result = o3d.t.pipelines.registration.icp(
+                t_src,
+                t_tgt,
+                self.max_correspondence_distance,
+                init_tensor,
+                estimation,
+                criteria,
+            )
+            return self._format_tensor_result(result)
+        else:
+            tukey = o3d.pipelines.registration.TukeyLoss(k=K)
+            estimation = (
+                o3d.pipelines.registration.TransformationEstimationPointToPlane(tukey)
+            )
+            return o3d.pipelines.registration.registration_icp(
+                source,
+                target,
+                self.max_correspondence_distance,
+                init_transform,
+                estimation,
+                self.criteria,
+            )
 
     def gen_icp(self, source, target, init_transform):
+        if self.use_tensor:
+            logging.warning(
+                "Generalized ICP is not supported on the Tensor API. Executing on CPU."
+            )
+
         source = self.ensure_normals(source)
         target = self.ensure_normals(target)
 
@@ -209,26 +334,52 @@ class Registration:
         )
         return result
 
-    # def multi_scale_icp(self, source, target, init_transform):
-    #     voxel_sizes = o3d.utility.DoubleVector([0.1, 0.05, 0.025])
-    #     max_iter = o3d.utility.IntVector([50, 30, 14])
+    def multi_scale_icp(self, source, target, init_transform):
+        source = self.ensure_normals(source)
+        target = self.ensure_normals(target)
 
-    #     criteria_list = [
-    #         o3d.t.pipelines.registration.ICPConvergenceCriteria(max_iteration=it)
-    #         for it in max_iter
-    #     ]
+        # Uses whichever device was configured in __init__ (GPU or fallback CPU)
+        t_device = getattr(self, "device", o3c.Device("CPU:0"))
+        t_dtype = getattr(self, "float_dtype", o3c.float32)
 
-    #     result = o3d.t.pipelines.registration.multi_scale_icp(
-    #         source,
-    #         target,
-    #         voxel_sizes,
-    #         criteria_list,
-    #         max_correspondence_distances=o3d.utility.DoubleVector([0.3, 0.15, 0.075]),
-    #         init_source_to_target=init_transform,
-    #         estimation=o3d.t.pipelines.registration.TransformationEstimationPointToPlane(),
-    #     )
+        t_src = o3d.t.geometry.PointCloud.from_legacy(source, t_dtype, t_device)
+        t_tgt = o3d.t.geometry.PointCloud.from_legacy(target, t_dtype, t_device)
 
-    #     return result
+        estimation = o3d.t.pipelines.registration.TransformationEstimationPointToPlane()
+
+        # Coarse-to-fine parameter configuration
+        voxel_sizes = o3d.utility.DoubleVector(
+            [self.voxel * 4, self.voxel * 2, self.voxel, self.voxel / 2]
+        )
+        max_corrs = o3d.utility.DoubleVector(
+            [
+                self.max_correspondence_distance * 4,
+                self.max_correspondence_distance * 2,
+                self.max_correspondence_distance,
+                self.max_correspondence_distance / 2,
+            ]
+        )
+
+        max_iter = o3d.utility.IntVector([50, 30, 14])
+        criteria_list = [
+            o3d.t.pipelines.registration.ICPConvergenceCriteria(
+                self.relative_fitness, self.relative_rmse, it
+            )
+            for it in max_iter
+        ]
+
+        init_tensor = o3d.core.Tensor(init_transform, dtype=o3d.core.float64)
+        result = o3d.t.pipelines.registration.multi_scale_icp(
+            t_src,
+            t_tgt,
+            voxel_sizes,
+            criteria_list,
+            max_corrs,
+            init_tensor,
+            estimation,
+        )
+
+        return self._format_tensor_result(result)
 
     def get_initial_guess(self, source, target):
         src_down = self.preprocess(source)
@@ -243,12 +394,8 @@ class Registration:
 
         return ransac_result
 
-    def register(self, source, target, use_gpu=False):
+    def register(self, source, target):
         ransac_result = self.get_initial_guess(source, target)
-
-        # if use_gpu:
-        #     icp_result = self.gpu_icp(source, target, ransac_result.transformation)
-        # else:
         icp_result = self.gen_icp(source, target, ransac_result.transformation)
 
         return icp_result, ransac_result
@@ -420,6 +567,9 @@ class Registration:
             results.append(self.benchmark_method(self.icp, src, tgt, init_guess))
             results.append(self.benchmark_method(self.plane_icp, src, tgt, init_guess))
             results.append(self.benchmark_method(self.gen_icp, src, tgt, init_guess))
+            results.append(
+                self.benchmark_method(self.multi_scale_icp, src, tgt, init_guess)
+            )
 
         # 3. Print the unified table
         self.print_result_summary(results)

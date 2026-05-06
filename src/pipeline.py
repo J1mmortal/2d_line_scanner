@@ -17,6 +17,7 @@ class Pipeline:
         self,
         source_path: str,
         target_path: str,
+        use_tensor: bool = False,
         sor_neighbours: int = None,
         sor_std: float = 1.0,
         voxel_size: float = 2.0,
@@ -35,7 +36,7 @@ class Pipeline:
         aligned_path="../data/CC/alg_source_CC.ply",
         skip_reg=False,
     ):
-        self.reg = Registration(voxel_size)
+        self.reg = Registration(voxel_size, use_tensor=use_tensor)
         self.det = DamageDetector()
         self.ccl = CloudCompare(comp_path=source_path, ref_path=target_path)
 
@@ -192,6 +193,7 @@ tgt = "../data/block/block_angle.ply"
 pip = Pipeline(
     src,
     tgt,
+    use_tensor=True,
     sor_neighbours=None,
     sor_std=2.0,
     voxel_size=1,
