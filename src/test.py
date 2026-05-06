@@ -22,8 +22,9 @@ reg = Registration(10)
 
 # subprocess.run(cmd, capture_output=True, text=True, check=True)
 
-src_path = "../data/block_damage.ply"
+src_path = "../data/block_angle.ply"
 src = reg.load_pcd(src_path)
-fpcd, _ = reg.SOR(src, 60, 3)
-reg.visualise_result(src)
-reg.visualise_result(fpcd)
+# fpcd, _ = reg.SOR(src, 60, 3)
+fpcd, _ = reg.radius_outlier_removal(src, 60, 0.7)
+reg.visualise_result(src, downsample=0.002)
+reg.visualise_result(fpcd, downsample=0.002)

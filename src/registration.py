@@ -5,12 +5,13 @@ import time
 
 
 class Registration:
-    def __init__(self, voxel_size=0.05):
+    def __init__(self, voxel_size=0.05, use_gpu = False):
 
         self.voxel = voxel_size
+        self.use_gpu = self
 
         # ICP correspondance distances
-        self.max_correspondence_distance = self.voxel * 0.4
+        self.max_correspondence_distance = self.voxel * 0.6
 
         # For estimating normals
         self.normal_radius = self.voxel * 2
@@ -91,8 +92,17 @@ class Registration:
         filtered_cloud, ind = pcd.remove_statistical_outlier(
             nb_neighbors=neigbours, std_ratio=std_ratio
         )
+        removed = len(pcd.points) - len(filtered_cloud.points)
 
-        return filtered_cloud, ind
+        return filtered_cloud, removed
+
+    def radius_outlier_removal(self, pcd, n_points, radius):
+        filtered_cloud, ind = pcd.remove_radius_outlier(
+            nb_points=n_points, radius=radius
+        )
+        removed = len(pcd.points) - len(filtered_cloud.points)
+
+        return filtered_cloud, removed
 
     def downsample(self, pcd, ratio):
         bbox = pcd.get_axis_aligned_bounding_box()
@@ -233,12 +243,14 @@ class Registration:
 
         return ransac_result
 
-    def register(self, source, target):
+    def register(self, source, target, use_gpu=False):
         ransac_result = self.get_initial_guess(source, target)
+
+        # if use_gpu:
+        #     icp_result = self.gpu_icp(source, target, ransac_result.transformation)
+        # else:
         icp_result = self.gen_icp(source, target, ransac_result.transformation)
 
-        # evaluation = self.evaluate_alignment(source, target, icp_result.transformation)
-        # print(evaluation)
         return icp_result, ransac_result
 
     def evaluate_alignment(self, source, target, transform):

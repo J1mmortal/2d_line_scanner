@@ -60,9 +60,15 @@ class Pipeline:
 
         self.src = self.reg.load_pcd(source_path)
         self.tgt = self.reg.load_pcd(target_path)
+
         if self.sor_neighbours is not None:
-            self.src = self.reg.SOR(self.src, self.sor_neighbours, self.sor_std)
-            self.tgt = self.reg.SOR(self.tgt, self.sor_neighbours, self.sor_std)
+            # self.src, removed = self.reg.SOR(
+            #     self.src, self.sor_neighbours, self.sor_std
+            # )
+            self.tgt, removed = self.reg.SOR(
+                self.tgt, self.sor_neighbours, self.sor_std
+            )
+            log.info(f"Performed Statistical Outlier Removal, removed {removed} points")
 
         # Results populated by run()
         self.alg_src = None
@@ -77,6 +83,7 @@ class Pipeline:
 
         if self.benchmark:
             self._benchmark()
+            return log.info("Benchmarking complete")
 
         if not self.skip_reg:
             self._register()
@@ -109,7 +116,9 @@ class Pipeline:
 
     def _detect(self):
         log.info("Running damage detection...")
-        o3d.io.write_point_cloud(self.aligned_path, self.alg_src)
+
+        # o3d.io.write_point_cloud(self.aligned_path, self.alg_src)
+
         if self.cc:
             log.info("Running CloudCompare backend")
             self.ccl.comp_path = self.aligned_path
@@ -177,28 +186,28 @@ class Pipeline:
 # src = "../data/test_block_damaged_cleaned.ply"
 # tgt = "../data/test_block_cleaned.ply"
 
-src = "../data/block_damage_accel.ply"
-tgt = "../data/block.ply"
+src = "../data/block/block_damage_accel.ply"
+tgt = "../data/block/block_angle.ply"
 
 pip = Pipeline(
     src,
     tgt,
     sor_neighbours=None,
-    sor_std=1.0,
+    sor_std=2.0,
     voxel_size=1,
     sigma_thresh=3.0,
     percentile=95,
-    median_filter_kernel=21,
+    median_filter_kernel=None,
     cluster_eps=2.5,
     cluster_min_samples=600,
     fast_cluster=False,
-    min_fitness=0.9,
+    min_fitness=0.825,
     visualise=True,
-    benchmark=False,
+    benchmark=True,
     cc=False,
     c2c=False,
     m3c2=True,
     aligned_path="../data/CC/alg_source_CC.ply",
-    skip_reg=True,
+    skip_reg=False,
 )
 pip.run()
