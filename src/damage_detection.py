@@ -141,6 +141,46 @@ class DamageDetector:
 
         return noise_mean, noise_std, threshold
 
+    def crop_wheels_circular(self, pcd):
+        bbox = pcd.get_axis_aligned_bounding_box()
+        min_bound = bbox.get_min_bound()
+        extent = bbox.get_extent()
+
+        points = np.asarray(pcd.points)
+
+        # 1. Define wheel center locations (relative to bounding box)
+        # Adjust these percentages to match your specific bus model
+        rel_front_x = 0.24  # Front axle at 20% of bus length
+        rel_rear_x = 0.735  # Rear axle at 80% of bus length
+        rel_y = 0.13  # Hub centers at 12% of bus height
+
+        # 2. Map relative centers to absolute world coordinates
+        front_cx = min_bound[0] + (rel_front_x * extent[0])
+        rear_cx = min_bound[0] + (rel_rear_x * extent[0])
+        cz = min_bound[1] + (rel_y * extent[1])
+
+        # 3. Define the physical radius of the crop region
+        # Using a fraction of the bus height (e.g., 15%) keeps it scale-invariant
+        radius = 0.18 * extent[1]
+        radius_sq = radius**2
+
+        # 4. Calculate squared Euclidean distance in the 2D XZ plane
+        # We ignore the Y axis because we want to cut a cylinder completely through the bus
+        dist_to_front_sq = (points[:, 0] - front_cx) ** 2 + (points[:, 1] - cz) ** 2
+        dist_to_rear_sq = (points[:, 0] - rear_cx) ** 2 + (points[:, 1] - cz) ** 2
+
+        # 5. Create boolean masks for points inside the circles
+        is_front_wheel = dist_to_front_sq < radius_sq
+        is_rear_wheel = dist_to_rear_sq < radius_sq
+
+        wheel_mask = is_front_wheel | is_rear_wheel
+
+        # 6. Invert mask to keep the rest of the bus
+        keep_mask = ~wheel_mask
+        valid_indices = np.where(keep_mask)[0]
+
+        return pcd.select_by_index(valid_indices)
+
     def compute_bidirectional_c2c(self, aligned_source, target):
         src_to_tgt = np.asarray(
             aligned_source.compute_point_cloud_distance(target), dtype=float
@@ -176,7 +216,7 @@ class DamageDetector:
         # plt.savefig('/tmp/c2c_histogram.png', dpi=150, bbox_inches='tight')
         plt.show()
 
-    def visualise_binary(self, pcd, damage_mask):
+    def visualise_binary(self, pcd, damage_mask, downsample=0.008, write=False):
         colors = np.where(
             damage_mask[:, None],  # broadcast over RGB
             [1.0, 0.1, 0.1],  # red = damaged
@@ -186,7 +226,13 @@ class DamageDetector:
         vis_pcd = copy.deepcopy(pcd)
         vis_pcd.colors = o3d.utility.Vector3dVector(colors)
 
-        pcd = self.downsample(vis_pcd)
+        if write:
+            o3d.io.write_point_cloud(
+                "../data/debug/binary_cloud.ply",
+                vis_pcd,
+            )
+
+        pcd = self.downsample(vis_pcd, voxel_ratio=downsample)
         o3d.visualization.draw_geometries(
             [pcd],
             window_name="Binary Damage Mask 3D",
@@ -194,14 +240,14 @@ class DamageDetector:
             height=1000,
         )
 
-    def visualise_colourmap(self, pcd, distances):
+    def visualise_colourmap(self, pcd, distances, downsample=0.008, write=False):
         import matplotlib.cm as cm
         import matplotlib.colors as mcolors
 
         # Normalise distances to [0, 1] for colormap
         vmax = np.percentile(distances, 99)  # cap outliers
         norm = mcolors.Normalize(vmin=0, vmax=vmax)
-        cmap = cm.get_cmap("RdYlBu_r")  # red = high distance = damage
+        cmap = cm.get_cmap("turbo")  # red = high distance = damage
         # cmap = cm.get_cmap("turbo")
 
         # Map each point's distance to an RGB colour
@@ -211,7 +257,13 @@ class DamageDetector:
         vis_pcd = copy.deepcopy(pcd)
         vis_pcd.colors = o3d.utility.Vector3dVector(colors_rgb)
 
-        pcd = self.downsample(vis_pcd)
+        if write:
+            o3d.io.write_point_cloud(
+                "../data/debug/cmap_cloud.ply",
+                vis_pcd,
+            )
+
+        pcd = self.downsample(vis_pcd, voxel_ratio=downsample)
         o3d.visualization.draw_geometries(
             [pcd],
             window_name="Damage Heatmap",
@@ -220,7 +272,13 @@ class DamageDetector:
         )
 
     def color_point_cloud_by_labels(
-        self, aligned_source, labels, noise_color=(0.5, 0.5, 0.5), cmap_name="tab20"
+        self,
+        aligned_source,
+        labels,
+        noise_color=(0.5, 0.5, 0.5),
+        cmap_name="tab20",
+        downsample=0.008,
+        write=False,
     ):
         xyz = np.asarray(aligned_source.points)
         labels = np.asarray(labels)
@@ -243,8 +301,14 @@ class DamageDetector:
         colors[labels == -1] = noise_color
         pcd.colors = o3d.utility.Vector3dVector(colors)
 
+        if write:
+            o3d.io.write_point_cloud(
+                "../data/debug/clustered_cloud.ply",
+                pcd,
+            )
+
         o3d.visualization.draw_geometries(
-            [self.downsample(pcd)],
+            [self.downsample(pcd, voxel_ratio=downsample)],
             window_name=f"Damage clustered into {len(set(labels))-1} regions",
             width=1600,
             height=1000,

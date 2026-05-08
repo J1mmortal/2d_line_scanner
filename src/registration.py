@@ -7,18 +7,12 @@ import logging
 
 
 class Registration:
-    def __init__(self, voxel_size=0.05, use_tensor=False):
+    def __init__(self, voxel_size=0.05):
         self.voxel = voxel_size
-
-        if use_tensor and not o3c.cuda.is_available():
-            logging.warning(
-                "use_tensor requested but CUDA is not available. Falling back to legacy CPU implementation"
-            )
-            use_tensor = False
-
-        self.use_tensor = use_tensor
-        self.device = o3c.Device("CUDA:0") if use_tensor else o3c.Device("CPU:0")
+        self.device = o3c.Device("CPU:0")
         self.float_dtype = o3c.float32
+
+        self.tf = np.array([[0, 1, 0, 0], [1, 0, 0, 0], [0, 0, -1, 0], [0, 0, 0, 1]])
 
         # ICP correspondance distances
         self.max_correspondence_distance = self.voxel * 0.4
@@ -201,93 +195,34 @@ class Registration:
         source = self.ensure_normals(source)
         target = self.ensure_normals(target)
 
-        if self.use_tensor:  # only True now if CUDA is actually available
-            t_src = o3d.t.geometry.PointCloud.from_legacy(
-                source, self.float_dtype, self.device
-            )
-            t_tgt = o3d.t.geometry.PointCloud.from_legacy(
-                target, self.float_dtype, self.device
-            )
-            init = self._o3c.Tensor(init_transform, dtype=self._o3c.float64)
-            result = o3d.t.pipelines.registration.icp(
-                t_src,
-                t_tgt,
-                self.max_correspondence_distance,
-                init,
-                o3d.t.pipelines.registration.TransformationEstimationPointToPoint(),
-                o3d.t.pipelines.registration.ICPConvergenceCriteria(
-                    self.relative_fitness, self.relative_rmse, self.max_iteration
-                ),
-            )
-            return self._format_tensor_result(result)
-        else:
-            estimation = (
-                o3d.pipelines.registration.TransformationEstimationPointToPoint()
-            )
-            return o3d.pipelines.registration.registration_icp(
-                source,
-                target,
-                self.max_correspondence_distance,
-                init_transform,
-                estimation,
-                self.criteria,
-            )
+        estimation = o3d.pipelines.registration.TransformationEstimationPointToPoint()
+        return o3d.pipelines.registration.registration_icp(
+            source,
+            target,
+            self.max_correspondence_distance,
+            init_transform,
+            estimation,
+            self.criteria,
+        )
 
     def plane_icp(self, source, target, init_transform, K=10):
         source = self.ensure_normals(source)
         target = self.ensure_normals(target)
 
-        if self.use_tensor:
-            t_src = o3d.t.geometry.PointCloud.from_legacy(
-                source, self.float_dtype, self.device
-            )
-            t_tgt = o3d.t.geometry.PointCloud.from_legacy(
-                target, self.float_dtype, self.device
-            )
-
-            kernel = o3d.t.pipelines.registration.robust_kernel.RobustKernel(
-                o3d.t.pipelines.registration.robust_kernel.RobustKernelMethod.TukeyLoss,
-                K,
-            )
-            estimation = (
-                o3d.t.pipelines.registration.TransformationEstimationPointToPlane(
-                    kernel
-                )
-            )
-            criteria = o3d.t.pipelines.registration.ICPConvergenceCriteria(
-                self.relative_fitness, self.relative_rmse, self.max_iteration
-            )
-
-            init_tensor = self._to_init_tensor(init_transform)
-            result = o3d.t.pipelines.registration.icp(
-                t_src,
-                t_tgt,
-                self.max_correspondence_distance,
-                init_tensor,
-                estimation,
-                criteria,
-            )
-            return self._format_tensor_result(result)
-        else:
-            tukey = o3d.pipelines.registration.TukeyLoss(k=K)
-            estimation = (
-                o3d.pipelines.registration.TransformationEstimationPointToPlane(tukey)
-            )
-            return o3d.pipelines.registration.registration_icp(
-                source,
-                target,
-                self.max_correspondence_distance,
-                init_transform,
-                estimation,
-                self.criteria,
-            )
+        tukey = o3d.pipelines.registration.TukeyLoss(k=K)
+        estimation = o3d.pipelines.registration.TransformationEstimationPointToPlane(
+            tukey
+        )
+        return o3d.pipelines.registration.registration_icp(
+            source,
+            target,
+            self.max_correspondence_distance,
+            init_transform,
+            estimation,
+            self.criteria,
+        )
 
     def gen_icp(self, source, target, init_transform):
-        if self.use_tensor:
-            logging.warning(
-                "Generalized ICP is not supported on the Tensor API. Executing on CPU."
-            )
-
         source = self.ensure_normals(source)
         target = self.ensure_normals(target)
 
@@ -391,21 +326,30 @@ class Registration:
         )
 
     def visualise_result(
-        self, source, target=None, transform=np.eye(4), downsample=0.008
+        self, source, target=None, transform=np.eye(4), downsample=0.008, write=False
     ):  # Downsample sets voxel size: =1 gives one voxel for the whole point cloud
         if target is not None:
+
+            source.paint_uniform_color([1, 0.2, 0])
+            target.paint_uniform_color([0, 0.65, 0.93])
+
+            source.transform(transform)
+
+            if write:
+                o3d.io.write_point_cloud(
+                    "../data/debug/reg_cloud.ply",
+                    source + target,
+                )
+
             src_d = self.downsample(source, ratio=downsample)
             tgt_d = self.downsample(target, ratio=downsample)
-
-            src_d.paint_uniform_color([1, 0.2, 0])
-            tgt_d.paint_uniform_color([0, 0.65, 0.93])
-
-            src_d.transform(transform)
-
             title = f"Alignment after transformation with {transform}"
 
             o3d.visualization.draw_geometries(
-                [src_d, tgt_d], window_name=title, width=1000, height=800
+                [src_d, tgt_d],
+                window_name=title,
+                width=1600,
+                height=1000,
             )
         else:
             src_d = self.downsample(source, ratio=downsample)

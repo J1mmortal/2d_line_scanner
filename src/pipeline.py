@@ -1,5 +1,6 @@
 import copy
 import logging
+import yaml
 import open3d as o3d
 from registration import Registration
 from damage_detection import DamageDetector
@@ -17,7 +18,6 @@ class Pipeline:
         self,
         source_path: str,
         target_path: str,
-        use_tensor: bool = False,
         sor_neighbours: int = None,
         sor_std: float = 1.0,
         voxel_size: float = 2.0,
@@ -35,8 +35,9 @@ class Pipeline:
         m3c2=False,
         aligned_path="../data/CC/alg_source_CC.ply",
         skip_reg=False,
+        write: bool = False,
     ):
-        self.reg = Registration(voxel_size, use_tensor=use_tensor)
+        self.reg = Registration(voxel_size)
         self.det = DamageDetector()
         self.ccl = CloudCompare(comp_path=source_path, ref_path=target_path)
 
@@ -56,11 +57,12 @@ class Pipeline:
         self.c2c = c2c
         self.m3c2 = m3c2
         self.skip_reg = skip_reg
+        self.write = write
 
         self.aligned_path = aligned_path
 
-        self.src = self.reg.load_pcd(source_path)
-        self.tgt = self.reg.load_pcd(target_path)
+        self.src = self.reg.load_pcd(source_path).transform(self.reg.tf)
+        self.tgt = self.reg.load_pcd(target_path).transform(self.reg.tf)
 
         if self.sor_neighbours is not None:
             # self.src, removed = self.reg.SOR(
@@ -73,6 +75,7 @@ class Pipeline:
 
         # Results populated by run()
         self.alg_src = None
+        self.cropped_pcd = None
         self.transformation = None
         self.mask = None
         self.distances = None
@@ -81,6 +84,7 @@ class Pipeline:
 
     def run(self):
         # self.reg.set_voxel(self.tgt)
+        log.info(f"Number of points in point cloud: {len(self.tgt.points)}")
 
         if self.benchmark:
             self._benchmark()
@@ -113,12 +117,21 @@ class Pipeline:
         self.alg_src = copy.deepcopy(self.src).transform(self.transformation)
 
         if self.visualise:
-            self.reg.visualise_result(self.src, self.tgt, self.transformation)
+            self.reg.visualise_result(
+                self.src,
+                self.tgt,
+                self.transformation,
+                downsample=0.001,
+                write=self.write,
+            )
 
     def _detect(self):
         log.info("Running damage detection...")
 
-        # o3d.io.write_point_cloud(self.aligned_path, self.alg_src)
+        self.alg_src = self.det.crop_wheels_circular(self.alg_src)
+
+        if self.write:
+            o3d.io.write_point_cloud(self.aligned_path, self.alg_src)
 
         if self.cc:
             log.info("Running CloudCompare backend")
@@ -144,8 +157,12 @@ class Pipeline:
         log.info("Damage points: %d / %d", self.mask.sum(), len(self.mask))
 
         if self.visualise:
-            self.det.visualise_colourmap(self.alg_src, self.distances)
-            self.det.visualise_binary(self.alg_src, self.mask)
+            self.det.visualise_colourmap(
+                self.alg_src, self.distances, downsample=0.001, write=self.write
+            )
+            self.det.visualise_binary(
+                self.alg_src, self.mask, downsample=0.001, write=self.write
+            )
 
     def _cluster(self):
         log.info(f"Clustering damage regions (Fast cluster: {self.fast_cluster})...")
@@ -168,7 +185,9 @@ class Pipeline:
         log.info("Found %d damage cluster(s)", n_clusters)
 
         if self.visualise:
-            self.det.color_point_cloud_by_labels(self.alg_src, self.labels)
+            self.det.color_point_cloud_by_labels(
+                self.alg_src, self.labels, downsample=0.001, write=self.write
+            )
 
     def _compute_metrics(self):
         log.info("Computing damage metrics...")
@@ -187,29 +206,36 @@ class Pipeline:
 # src = "../data/test_block_damaged_cleaned.ply"
 # tgt = "../data/test_block_cleaned.ply"
 
-src = "../data/block/block_damage_accel.ply"
-tgt = "../data/block/block_angle.ply"
+# src = "../data/block/block_damage_accel.ply"
+# tgt = "../data/block/block_angle.ply"
+
+src = "../data/bus/bus_7damage.ply"
+tgt = "../data/bus/bus.ply"
+
+# src = "../data/bus/bus_7damage.ply"
+# tgt = "../data/bus/bus_4damage.ply"
 
 pip = Pipeline(
     src,
     tgt,
-    use_tensor=False,
     sor_neighbours=None,
     sor_std=2.0,
-    voxel_size=1,
+    voxel_size=5,
     sigma_thresh=3.0,
     percentile=95,
-    median_filter_kernel=None,
-    cluster_eps=2.5,
-    cluster_min_samples=600,
+    median_filter_kernel=17,
+    cluster_eps=0.55,
+    cluster_min_samples=70,
     fast_cluster=False,
     min_fitness=0.825,
-    visualise=False,
+    visualise=True,
     benchmark=False,
     cc=False,
     c2c=False,
     m3c2=True,
     aligned_path="../data/CC/alg_source_CC.ply",
     skip_reg=False,
+    write=False,
 )
+
 pip.run()

@@ -1,8 +1,10 @@
 from registration import Registration
+from damage_detection import DamageDetector
 import open3d as o3d
 import numpy as np
 
 reg = Registration(10)
+det = DamageDetector()
 
 # import subprocess
 
@@ -22,9 +24,17 @@ reg = Registration(10)
 
 # subprocess.run(cmd, capture_output=True, text=True, check=True)
 
-src_path = "../data/block_angle.ply"
-src = reg.load_pcd(src_path)
-# fpcd, _ = reg.SOR(src, 60, 3)
-fpcd, _ = reg.radius_outlier_removal(src, 60, 0.7)
-reg.visualise_result(src, downsample=0.002)
-reg.visualise_result(fpcd, downsample=0.002)
+# src_path = "../data/block_angle.ply"
+src_path = r"..\data\bus\bus_1damage.ply"
+src = reg.load_pcd(src_path).transform(reg.tf)
+
+# tf = np.array([[0, 1, 0, 0], [1, 0, 0, 0], [0, 0, -1, 0], [0, 0, 0, 1]])
+
+cropped = det.crop_wheels_circular(src)
+reg.visualise_result(cropped, downsample=0.001)
+
+
+# # fpcd, _ = reg.SOR(src, 60, 3)
+# fpcd, _ = reg.radius_outlier_removal(src, 60, 0.7)
+# reg.visualise_result(src, downsample=0.002)
+# reg.visualise_result(fpcd, downsample=0.002)
