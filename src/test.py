@@ -4,63 +4,87 @@ from cloud_compare import CloudCompare
 import open3d as o3d
 import numpy as np
 
+from scipy.spatial import ConvexHull, cKDTree
+
 reg = Registration(10)
 det = DamageDetector()
 
+# tgt_p = "../data/bus/bus_damagev3.ply"
+tgt_p = "../data/bus/bus_v2.ply"
 
-# import subprocess
+tgt = reg.load_pcd(tgt_p)
 
-# cc_path = r"C:\Program Files\CloudCompare\CloudCompare.exe"
-# input = r"C:\Users\fvsch\Downloads\Dumps_face\Face_1 (2).obj"
+det.select_bus_hull(tgt, eps=2.1)
 
-# cmd = [
-#     cc_path,
-#     "-SILENT",
-#     "-C_EXPORT_FMT",
-#     "PCD",  # or "PLY"
-#     "-NO_TIMESTAMP",
-#     "-O",
-#     input,
-#     "-SAVE_CLOUDS",
-# ]
+# def find_largest_cluster(pcd, labels):
+#     xyz = np.asarray(pcd.points)
 
-# subprocess.run(cmd, capture_output=True, text=True, check=True)
+#     all_metrics = {}
+#     unique_ids = np.unique(labels)
 
-# src_path = "../data/block_angle.ply"
-# src_path = r"..\data\bus\bus_1damage.ply"
-# src = reg.load_pcd(src_path).transform(reg.tf)
+#     # valid_labels = [lbl for lbl in unique_ids if lbl >= 0]
 
-# tf = np.array([[0, 1, 0, 0], [1, 0, 0, 0], [0, 0, -1, 0], [0, 0, 0, 1]])
+#     for id in unique_ids:
+#         if id == -1:
+#             continue
 
-# cropped = det.crop_wheels_circular(src)
-# reg.visualise_result(cropped, downsample=0.001)
+#         mask = labels == id
+#         c_xyz = xyz[mask]
+#         # c_dist = np.abs(distances[mask])
 
-# src_p = r"..\data\block\bv2_big.ply"
-# tgt_p = r"..\data\block\bv2.ply"
+#         if len(c_xyz) < 3:
+#             continue  # Cannot compute 2D area with < 3 points
 
-# src_p = "../data/bus/bus_damagev2.ply"
-src_p = r"..\data\CC\alg_source_CC.ply"
-tgt_p = "../data/bus/bus.ply"
+#         # 1. PCA to find the local plane of the damage
+#         mean = np.mean(c_xyz, axis=0)
+#         centered = c_xyz - mean
+#         cov = np.cov(centered.T)
+#         evals, evecs = np.linalg.eigh(cov)
+
+#         # evecs[:, 0] is the normal (smallest variance).
+#         # evecs[:, 1:] define the flat 2D plane.
+#         local_2d = centered @ evecs[:, 1:]
+
+#         # 2. Compute exact area using Convex Hull (ignores point density)
+#         try:
+#             hull = ConvexHull(local_2d)
+#             projected_area = float(hull.volume)  # In 2D, scipy hull.volume is the area
+#             perimeter = float(hull.area)
+#         except Exception as e:
+#             Warning(f"Convex hull failed for cluster {id}: {e}")
+#             projected_area = 0.0
+#             perimeter = 0.0
+
+#         # 3. Max depth and estimated volume
+#         # max_depth = float(np.max(c_dist))
+#         # avg_depth = float(np.mean(c_dist))
+#         # volume = projected_area * avg_depth  # Approximated cylinder/prism volume
+
+#         # rgb = label_to_color.get(id, (0.0, 0.0, 0.0))
+#         # colour = self._get_closest_color_name(rgb)
+
+#         all_metrics[int(id)] = {
+#             "projected_area": projected_area,
+#             # "volume": volume,
+#             "perimeter": perimeter,
+#             # "max_depth": max_depth,
+#             # "color": colour,
+#             # "color_rgb": rgb,
+#         }
+
+#     print(
+#         "\n============================== Damage cluster metrics ================================="
+#     )
+#     header = f"{'Cluster ID':<12}{'Area':<14}{'Perimeter':<14}"
+#     print("-" * len(header))
+
+#     for cluster_id, data in sorted(all_metrics.items()):
+#         area = f"{data['projected_area']:.6f}"
+#         perimeter = f"{data['perimeter']:.6f}"
+
+#         print(f"{cluster_id:<12}{area:<14}{perimeter:<14}")
+
+#     return all_metrics
 
 
-# ccl = CloudCompare(src_p, tgt_p)
-# pcd, dist = ccl.run_cc(C2C=True)
-# pcd.transform(reg.tf)
-# det.visualise_colourmap(pcd, dist, downsample=0.001)
-
-# src = reg.load_pcd(src_p).transform(reg.tf)
-# src, _ = reg.SOR(src, 80, 3)
-
-# reg.visualise_result(src, downsample=0.001)
-# pln, _ = det.extract_dominant_plane(src, distance_threshold=1.12)
-# # pln, _ = det.extract_dominant_plane(src, distance_threshold=0.9)
-# reg.visualise_result(pln, downsample=0.001)
-
-# # o3d.io.write_point_cloud("normal_ransac.ply", pln)
-# # pln, _ = reg.SOR(pln, 20, 2)
-# # pln, _ = reg.SOR(pln, 100, 1.2)
-# # reg.visualise_result(pln, downsample=0.001)
-# # # fpcd, _ = reg.SOR(src, 60, 3)
-# fpcd, _ = reg.radius_outlier_removal(pln, 200, 1)
-# # reg.visualise_result(src, downsample=0.002)
-# reg.visualise_result(fpcd, downsample=0.001)
+# find_largest_cluster(tgt, labels)

@@ -71,6 +71,16 @@ class Pipeline:
         self.src = self.reg.load_pcd(source_path).transform(self.reg.tf)
         self.tgt = self.reg.load_pcd(target_path).transform(self.reg.tf)
 
+        # if self.crop:
+        #     self.src = self.det.select_bus_hull(self.src, eps=2.0, visualise=False)
+        #     self.tgt = self.det.select_bus_hull(self.tgt, eps=2.1, visualise=False)
+
+        # self.src = self.det.crop_wheels_circular(self.src)
+        # self.tgt = self.det.crop_wheels_circular(self.tgt)
+
+        # self.src = self.reg.crop_pcd(self.src, 55, 40)
+        # self.tgt = self.reg.crop_pcd(self.tgt, 55, 40)
+
         if self.plane_fit_dist_th is not None:
             log.info("Segmenting plane...")
             self.src, removed = self.det.extract_dominant_plane(
@@ -170,13 +180,6 @@ class Pipeline:
             self.mask = self.distances > threshold
 
         else:
-            # self.mask, self.distances = self.det.detect(
-            #     self.alg_src,
-            #     self.tgt,
-            #     sigma_thresh=self.sigma_thresh,
-            #     percentile=self.percentile,
-            #     median_filter_kernel=self.median_filter_kernel,
-            # )
             self.mask, self.distances = self.det.detect_damage(
                 self.alg_src,
                 self.tgt,
@@ -227,7 +230,7 @@ class Pipeline:
     def _compute_metrics(self):
         log.info("Computing damage metrics...")
         self.metrics = self.det.calculate_damage_metrics(
-            self.alg_src, self.distances, self.labels, grid_res=0.1
+            self.alg_src, self.distances, self.labels
         )
 
     def _benchmark(self):
@@ -268,7 +271,7 @@ pip = Pipeline(
     cluster_eps=cluster_eps,
     cluster_min_samples=cluster_samples,
     fast_cluster=False,
-    min_fitness=0.825,
+    min_fitness=0.98,
     visualise=True,
     benchmark=False,
     cc=False,

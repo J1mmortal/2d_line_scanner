@@ -34,33 +34,6 @@ class DamageDetector:
         )
         return pcd_down
 
-    def detect(
-        self,
-        aligned_source,
-        target,
-        sigma_thresh=3,
-        percentile=80,
-        median_filter_kernel=None,
-    ):
-        pcd_dist = aligned_source.compute_point_cloud_distance(target)
-        distances = np.asarray(pcd_dist)
-
-        # hi = np.percentile(distances, 99.8)
-        # distances[distances > hi] = 0
-
-        mean, std, threshold = self.estimate_noise(
-            distances, percentile=percentile, sigma_thresh=sigma_thresh
-        )
-
-        # Median (or wiener) filter to smooth noise
-        if median_filter_kernel is not None:
-            distances = medfilt(distances, median_filter_kernel)
-            # distances = wiener(distances, median_filter_kernel)
-
-        damage_mask = distances > threshold
-
-        return damage_mask, distances
-
     def detect_damage(
         self,
         aligned_source,
@@ -130,11 +103,12 @@ class DamageDetector:
         bbox = aligned_source.get_axis_aligned_bounding_box()
         max_dim = np.max(bbox.get_extent())
         if eps > max_dim * 0.1:
-            warnings.warn(
+            return warnings.warn(
                 f"eps={eps} is large relative to cloud extent ({max_dim:.2f}). Check units."
             )
+
         if eps < max_dim * 0.001:
-            warnings.warn(
+            return warnings.warn(
                 f"eps={eps} is small relative to cloud extent ({max_dim:.2f}). Check units."
             )
 
@@ -151,10 +125,13 @@ class DamageDetector:
         return full_labels
 
     def cluster_fast(
-        self, aligned_source, damage_mask, voxel_size=0.5, eps=2.0, min_samples=10
+        self, aligned_source, damage_mask=None, voxel_size=0.5, eps=2.0, min_samples=10
     ):
         xyz = np.asarray(aligned_source.points)
-        xyz_damage = xyz[damage_mask]
+        if damage_mask is not None:
+            xyz_damage = xyz[damage_mask]
+
+        xyz_damage = xyz
 
         if len(xyz_damage) == 0:
             return np.full(len(xyz), -1, dtype=int)
@@ -250,6 +227,33 @@ class DamageDetector:
 
         # Return only the points that belong to that plane
         return pcd.select_by_index(inliers), removed
+
+    def select_bus_hull(
+        self, pcd, voxel_size=1, eps=2.0, min_samples=10, visualise=True
+    ):
+        labels = self.cluster_fast(
+            pcd, voxel_size=voxel_size, eps=eps, min_samples=min_samples
+        )
+
+        if visualise:
+            self.color_point_cloud_by_labels(pcd, labels)
+
+        xyz = np.asarray(pcd.points)
+        cropped_xyz = xyz[labels == 0]
+
+        cropped_pcd = o3d.geometry.PointCloud()
+        cropped_pcd.points = o3d.utility.Vector3dVector(cropped_xyz)
+
+        if visualise:
+            cropped_pcd.paint_uniform_color([0.0, 0.0, 1.0])
+            o3d.visualization.draw_geometries(
+                [self.downsample(cropped_pcd)],
+                window_name="Bus Hull",
+                width=1600,
+                height=1000,
+            )
+
+        return cropped_pcd
 
     def crop_damage(
         self,
@@ -431,9 +435,7 @@ class DamageDetector:
         )
 
     # Need to correctly pass the damage plane as coming from the scanner
-    def calculate_damage_metrics(
-        self, pcd, distances, labels, grid_res=0.25, cmap_name="tab20"
-    ):
+    def calculate_damage_metrics(self, pcd, distances, labels, cmap_name="tab20"):
         """
         Calculates 2.5D metrics for a specific damage cluster.
         grid_res MUST be in the same physical units as your XYZ coordinates.

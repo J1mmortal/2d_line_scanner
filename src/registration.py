@@ -98,6 +98,53 @@ class Registration:
 
         return pcd
 
+    def crop_pcd(
+        self,
+        pcd,
+        max_y_threshold=55,
+        x_thresh=40,
+        height_axis=1,
+        width_axis=0,
+        robust_floor=True,
+    ):
+        xyz = np.asarray(pcd.points)
+        heights = xyz[:, height_axis]
+        widths = xyz[:, width_axis]
+
+        # Calculate floor relative to actual point distribution
+        floor_y = np.percentile(heights, 1) if robust_floor else np.min(heights)
+        abs_thresh_y = floor_y + max_y_threshold
+
+        floor_x = np.percentile(widths, 1) if robust_floor else np.min(widths)
+        roof_x = np.percentile(widths, 99) if robust_floor else np.max(widths)
+        min_thresh_x = floor_x + x_thresh
+        max_thresh_x = roof_x - x_thresh
+
+        # Create spatial mask and intersect with damage mask
+        valid_height_mask = heights <= abs_thresh_y
+        valid_width_mask = (min_thresh_x <= widths) & (widths <= max_thresh_x)
+        filtered_mask = valid_height_mask & valid_width_mask
+
+        cropped_xyz = xyz[filtered_mask]
+
+        cropped_pcd = o3d.geometry.PointCloud()
+        cropped_pcd.points = o3d.utility.Vector3dVector(cropped_xyz)
+
+        removed_count = len(xyz) - filtered_mask.sum()
+        y_name = ["X", "Y", "Z"][height_axis]
+        x_name = ["X", "Y", "Z"][width_axis]
+
+        logging.info(
+            "Height and width filter (Rel %s: %.2fm; %s: %.2fm) removed %d points.",
+            y_name,
+            max_y_threshold,
+            x_name,
+            x_thresh,
+            removed_count,
+        )
+
+        return cropped_pcd
+
     def set_voxel(self, pcd, ratio=0.02):
         bbox = pcd.get_axis_aligned_bounding_box()
         extent = bbox.get_extent()
