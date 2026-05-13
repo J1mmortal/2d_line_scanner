@@ -361,7 +361,7 @@ class DamageDetector:
         import matplotlib.colors as mcolors
 
         # Normalise distances to [0, 1] for colormap
-        vmax = np.percentile(distances, 99)  # cap outliers
+        vmax = np.percentile(distances, 98)  # cap outliers
         norm = mcolors.Normalize(vmin=0, vmax=vmax)
         cmap = cm.get_cmap("turbo")  # red = high distance = damage
         # cmap = cm.get_cmap("turbo")

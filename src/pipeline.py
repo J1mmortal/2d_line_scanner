@@ -72,6 +72,7 @@ class Pipeline:
         self.tgt = self.reg.load_pcd(target_path).transform(self.reg.tf)
 
         if self.plane_fit_dist_th is not None:
+            log.info("Segmenting plane...")
             self.src, removed = self.det.extract_dominant_plane(
                 self.src, distance_threshold=plane_fit_dist_th
             )
@@ -83,6 +84,7 @@ class Pipeline:
             )
 
         if self.sor_neighbours is not None:
+            log.info("Removing statistical outliers...")
             self.src, removed = self.reg.SOR(
                 self.src, self.sor_neighbours, self.sor_std
             )
@@ -159,7 +161,7 @@ class Pipeline:
             self.ccl.comp_path = self.aligned_path
             self.ccl.ref_path = self.tgt_path
 
-            _, self.distances = self.ccl.run_cc(C2C=self.c2c, M3C2=self.m3c2)
+            self.alg_src, self.distances = self.ccl.run_cc(C2C=self.c2c, M3C2=self.m3c2)
             mean, std, threshold = self.det.estimate_noise(
                 self.distances,
                 percentile=self.percentile,
@@ -262,7 +264,6 @@ pip = Pipeline(
     voxel_size=5,
     sigma_thresh=4.0,
     percentile=80.0,
-    median_filter_kernel=None,
     crop=True,
     cluster_eps=cluster_eps,
     cluster_min_samples=cluster_samples,

@@ -92,7 +92,7 @@ class CloudCompare:
             return cc_output_file
 
     def run_m3c2(
-        self, overwrite=False
+        self, overwrite=True
     ):  # NOTE possible to add core points (3rd cloud, subsampled reference) to speed up calculation if necessary
         """
         Executes CloudCompare M3C2 distance calculation headlessly. Need to first manually create m3c2_params.txt file first.
@@ -187,6 +187,11 @@ class CloudCompare:
             )
 
         abs_dist = np.abs(distances)
+
+        nan_count = np.isnan(abs_dist).sum()
+        if nan_count > 0:
+            print(f"Warning: Replaced {nan_count} NaN M3C2 distances with 0.0")
+            abs_dist = np.nan_to_num(abs_dist, nan=0.0)
 
         pcd = o3d.geometry.PointCloud()
         pcd.points = o3d.utility.Vector3dVector(points)
