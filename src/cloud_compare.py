@@ -12,7 +12,7 @@ class CloudCompare:
         self,
         comp_path: str,
         ref_path: str,
-        params_path=r"..\data\m3c2_params_test_block.txt",
+        params_path=r"..\data\m3c2_params_bus.txt",
         cc_path=r"C:\Program Files\CloudCompare\CloudCompare.exe",
         output_dir=r"../data/las",
     ):

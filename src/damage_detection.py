@@ -3,6 +3,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 import copy
 import warnings
+import logging
+from sklearn.neighbors import KDTree
 
 from scipy.spatial import ConvexHull, cKDTree
 from scipy.signal import medfilt, wiener
@@ -43,6 +45,9 @@ class DamageDetector:
         pcd_dist = aligned_source.compute_point_cloud_distance(target)
         distances = np.asarray(pcd_dist)
 
+        # hi = np.percentile(distances, 99.8)
+        # distances[distances > hi] = 0
+
         mean, std, threshold = self.estimate_noise(
             distances, percentile=percentile, sigma_thresh=sigma_thresh
         )
@@ -55,6 +60,58 @@ class DamageDetector:
         damage_mask = distances > threshold
 
         return damage_mask, distances
+
+    def detect_damage(
+        self,
+        aligned_source,
+        target,
+        sigma_thresh=3,
+        percentile=80,
+        bidirectional=True,
+        remove_outliers=False,
+    ):
+        pcd_dist = aligned_source.compute_point_cloud_distance(target)
+        src_distances = np.asarray(pcd_dist)
+
+        mean, std, threshold = self.estimate_noise(
+            src_distances, percentile, sigma_thresh
+        )
+        damage_mask = src_distances > threshold
+
+        if bidirectional and damage_mask.sum() > 0:
+            tgt_dist = target.compute_point_cloud_distance(aligned_source)
+            tgt_distances = np.asarray(tgt_dist)
+
+            # For each flagged src point, find its nearest tgt point's reverse distance
+            src_pts = np.asarray(aligned_source.points)[damage_mask]
+            tgt_pts = np.asarray(target.points)
+
+            tree = cKDTree(tgt_pts)
+            _, nn_idx = tree.query(src_pts, k=1)
+            reverse_dists = tgt_distances[nn_idx]
+
+            mean_r, std_r, threshold_r = self.estimate_noise(
+                tgt_distances, percentile, sigma_thresh
+            )
+
+            # Only keep damage that is anomalous in BOTH directions
+            confirmed = reverse_dists > threshold_r
+
+            bidirectional_mask = np.zeros_like(damage_mask)
+            bidirectional_mask[np.where(damage_mask)[0][confirmed]] = True
+            damage_mask = bidirectional_mask
+
+        if remove_outliers and damage_mask.sum() > 0:
+            damaged_indices = np.where(damage_mask)[0]
+            damaged_pcd = aligned_source.select_by_index(damaged_indices)
+            clean_pcd, valid_inliers = damaged_pcd.remove_radius_outlier(
+                nb_points=100, radius=4
+            )
+            clean_damage_mask = np.zeros_like(damage_mask)
+            clean_damage_mask[damaged_indices[valid_inliers]] = True
+            damage_mask = clean_damage_mask
+
+        return damage_mask, src_distances
 
     def cluster(
         self, aligned_source, damage_mask, eps=2.0, min_samples=10
@@ -161,7 +218,7 @@ class DamageDetector:
 
         # 3. Define the physical radius of the crop region
         # Using a fraction of the bus height (e.g., 15%) keeps it scale-invariant
-        radius = 0.18 * extent[1]
+        radius = 0.19 * extent[1]
         radius_sq = radius**2
 
         # 4. Calculate squared Euclidean distance in the 2D XZ plane
@@ -180,6 +237,65 @@ class DamageDetector:
         valid_indices = np.where(keep_mask)[0]
 
         return pcd.select_by_index(valid_indices)
+
+    def extract_dominant_plane(self, pcd, distance_threshold=1.05):
+        """
+        Uses RANSAC to find the main face (dominant plane) even if slightly tilted.
+        """
+        # Find the largest plane in the point cloud
+        plane_model, inliers = pcd.segment_plane(
+            distance_threshold=distance_threshold, ransac_n=3, num_iterations=1000
+        )
+        removed = len(pcd.points) - len(pcd.select_by_index(inliers).points)
+
+        # Return only the points that belong to that plane
+        return pcd.select_by_index(inliers), removed
+
+    def crop_damage(
+        self,
+        pcd,
+        mask,
+        max_y_threshold,
+        x_thresh,
+        height_axis=1,
+        width_axis=0,
+        robust_floor=True,
+    ):
+        if max_y_threshold is None:
+            return mask
+
+        xyz = np.asarray(pcd.points)
+        heights = xyz[:, height_axis]
+        widths = xyz[:, width_axis]
+
+        # Calculate floor relative to actual point distribution
+        floor_y = np.percentile(heights, 1) if robust_floor else np.min(heights)
+        abs_thresh_y = floor_y + max_y_threshold
+
+        floor_x = np.percentile(widths, 1) if robust_floor else np.min(widths)
+        roof_x = np.percentile(widths, 99) if robust_floor else np.max(widths)
+        min_thresh_x = floor_x + x_thresh
+        max_thresh_x = roof_x - x_thresh
+
+        # Create spatial mask and intersect with damage mask
+        valid_height_mask = heights <= abs_thresh_y
+        valid_width_mask = (min_thresh_x <= widths) & (widths <= max_thresh_x)
+        filtered_mask = mask & valid_height_mask & valid_width_mask
+
+        removed_count = mask.sum() - filtered_mask.sum()
+        y_name = ["X", "Y", "Z"][height_axis]
+        x_name = ["X", "Y", "Z"][width_axis]
+
+        logging.info(
+            "Height and width filter (Rel %s: %.2fm; %s: %.2fm) removed %d points.",
+            y_name,
+            max_y_threshold,
+            x_name,
+            x_thresh,
+            removed_count,
+        )
+
+        return filtered_mask
 
     def compute_bidirectional_c2c(self, aligned_source, target):
         src_to_tgt = np.asarray(

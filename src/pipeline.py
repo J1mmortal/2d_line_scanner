@@ -1,6 +1,7 @@
 import copy
 import logging
 import yaml
+import numpy as np
 import open3d as o3d
 from registration import Registration
 from damage_detection import DamageDetector
@@ -18,12 +19,14 @@ class Pipeline:
         self,
         source_path: str,
         target_path: str,
+        plane_fit_dist_th: float = None,
         sor_neighbours: int = None,
         sor_std: float = 1.0,
         voxel_size: float = 2.0,
         sigma_thresh: float = 3.0,
         percentile: float = 80.0,
         median_filter_kernel=None,
+        crop: bool = True,
         cluster_eps: float = 2.0,
         cluster_min_samples: int = 10,
         fast_cluster: bool = False,
@@ -34,6 +37,7 @@ class Pipeline:
         c2c=True,
         m3c2=False,
         aligned_path="../data/CC/alg_source_CC.ply",
+        tgt_path="../data/CC/tgt_CC.ply",
         skip_reg=False,
         write: bool = False,
     ):
@@ -43,10 +47,12 @@ class Pipeline:
 
         self.sor_neighbours = sor_neighbours
         self.sor_std = sor_std
+        self.plane_fit_dist_th = plane_fit_dist_th
 
         self.sigma_thresh = sigma_thresh
         self.percentile = percentile
         self.median_filter_kernel = median_filter_kernel
+        self.crop = crop
         self.cluster_eps = cluster_eps
         self.cluster_min_samples = cluster_min_samples
         self.fast_cluster = fast_cluster
@@ -60,17 +66,27 @@ class Pipeline:
         self.write = write
 
         self.aligned_path = aligned_path
+        self.tgt_path = tgt_path
 
         self.src = self.reg.load_pcd(source_path).transform(self.reg.tf)
         self.tgt = self.reg.load_pcd(target_path).transform(self.reg.tf)
 
-        if self.sor_neighbours is not None:
-            # self.src, removed = self.reg.SOR(
-            #     self.src, self.sor_neighbours, self.sor_std
-            # )
-            self.tgt, removed = self.reg.SOR(
-                self.tgt, self.sor_neighbours, self.sor_std
+        if self.plane_fit_dist_th is not None:
+            self.src, removed = self.det.extract_dominant_plane(
+                self.src, distance_threshold=plane_fit_dist_th
             )
+            self.tgt, _ = self.det.extract_dominant_plane(
+                self.tgt, distance_threshold=plane_fit_dist_th
+            )
+            log.info(
+                f"Performed plane segmentation using RANSAC, removed {removed} points"
+            )
+
+        if self.sor_neighbours is not None:
+            self.src, removed = self.reg.SOR(
+                self.src, self.sor_neighbours, self.sor_std
+            )
+            self.tgt, _ = self.reg.SOR(self.tgt, self.sor_neighbours, self.sor_std)
             log.info(f"Performed Statistical Outlier Removal, removed {removed} points")
 
         # Results populated by run()
@@ -128,14 +144,20 @@ class Pipeline:
     def _detect(self):
         log.info("Running damage detection...")
 
-        self.alg_src = self.det.crop_wheels_circular(self.alg_src)
+        if self.crop:
+            self.alg_src = self.det.crop_wheels_circular(self.alg_src)
 
         if self.write:
             o3d.io.write_point_cloud(self.aligned_path, self.alg_src)
 
         if self.cc:
             log.info("Running CloudCompare backend")
+
+            o3d.io.write_point_cloud(self.aligned_path, self.alg_src)
+            o3d.io.write_point_cloud(self.tgt_path, self.tgt)
+
             self.ccl.comp_path = self.aligned_path
+            self.ccl.ref_path = self.tgt_path
 
             _, self.distances = self.ccl.run_cc(C2C=self.c2c, M3C2=self.m3c2)
             mean, std, threshold = self.det.estimate_noise(
@@ -146,13 +168,24 @@ class Pipeline:
             self.mask = self.distances > threshold
 
         else:
-            self.mask, self.distances = self.det.detect(
+            # self.mask, self.distances = self.det.detect(
+            #     self.alg_src,
+            #     self.tgt,
+            #     sigma_thresh=self.sigma_thresh,
+            #     percentile=self.percentile,
+            #     median_filter_kernel=self.median_filter_kernel,
+            # )
+            self.mask, self.distances = self.det.detect_damage(
                 self.alg_src,
                 self.tgt,
                 sigma_thresh=self.sigma_thresh,
                 percentile=self.percentile,
-                median_filter_kernel=self.median_filter_kernel,
+                bidirectional=True,  # new gate
+                remove_outliers=False,
             )
+
+        if self.crop:
+            self.mask = self.det.crop_damage(self.alg_src, self.mask, 55, 40)
 
         log.info("Damage points: %d / %d", self.mask.sum(), len(self.mask))
 
@@ -200,32 +233,39 @@ class Pipeline:
         self.reg.benchmark(self.src, self.tgt)
 
 
-# src = "../data/CC/SRC.ply"
-# tgt = "../data/CC/TGT.ply"
-
-# src = "../data/test_block_damaged_cleaned.ply"
-# tgt = "../data/test_block_cleaned.ply"
-
 # src = "../data/block/block_damage_accel.ply"
 # tgt = "../data/block/block_angle.ply"
 
-src = "../data/bus/bus_7damage.ply"
-tgt = "../data/bus/bus.ply"
+# cluster_eps = 0.55
+# cluster_samples = 70
+
+# src = "../data/bus/bus_damagev2.ply"
+# tgt = "../data/bus/bus.ply"
 
 # src = "../data/bus/bus_7damage.ply"
 # tgt = "../data/bus/bus_4damage.ply"
 
+src = "../data/bus/bus_damagev3.ply"
+tgt = "../data/bus/bus_v2.ply"
+
+cluster_eps = 1.5
+cluster_samples = 150
+
+
+# Bus
 pip = Pipeline(
     src,
     tgt,
-    sor_neighbours=None,
-    sor_std=2.0,
+    plane_fit_dist_th=None,
+    sor_neighbours=100,
+    sor_std=1.2,
     voxel_size=5,
-    sigma_thresh=3.0,
-    percentile=95,
-    median_filter_kernel=17,
-    cluster_eps=0.55,
-    cluster_min_samples=70,
+    sigma_thresh=4.0,
+    percentile=80.0,
+    median_filter_kernel=None,
+    crop=True,
+    cluster_eps=cluster_eps,
+    cluster_min_samples=cluster_samples,
     fast_cluster=False,
     min_fitness=0.825,
     visualise=True,
@@ -233,7 +273,6 @@ pip = Pipeline(
     cc=False,
     c2c=False,
     m3c2=True,
-    aligned_path="../data/CC/alg_source_CC.ply",
     skip_reg=False,
     write=False,
 )
