@@ -20,6 +20,7 @@ class Pipeline:
         source_path: str,
         target_path: str,
         plane_fit_dist_th: float = None,
+        select_hull: bool = False,
         sor_neighbours: int = None,
         sor_std: float = 1.0,
         voxel_size: float = 2.0,
@@ -48,6 +49,7 @@ class Pipeline:
         self.sor_neighbours = sor_neighbours
         self.sor_std = sor_std
         self.plane_fit_dist_th = plane_fit_dist_th
+        self.select_hull = select_hull
 
         self.sigma_thresh = sigma_thresh
         self.percentile = percentile
@@ -71,9 +73,9 @@ class Pipeline:
         self.src = self.reg.load_pcd(source_path).transform(self.reg.tf)
         self.tgt = self.reg.load_pcd(target_path).transform(self.reg.tf)
 
-        # if self.crop:
-        #     self.src = self.det.select_bus_hull(self.src, eps=2.0, visualise=False)
-        #     self.tgt = self.det.select_bus_hull(self.tgt, eps=2.1, visualise=False)
+        if self.select_hull:
+            self.src = self.det.select_bus_hull(self.src, eps=2.0, visualise=False)
+            self.tgt = self.det.select_bus_hull(self.tgt, eps=2.1, visualise=False)
 
         # self.src = self.det.crop_wheels_circular(self.src)
         # self.tgt = self.det.crop_wheels_circular(self.tgt)
@@ -156,7 +158,7 @@ class Pipeline:
     def _detect(self):
         log.info("Running damage detection...")
 
-        if self.crop:
+        if self.crop and not self.select_hull:
             self.alg_src = self.det.crop_wheels_circular(self.alg_src)
 
         if self.write:
@@ -250,6 +252,7 @@ class Pipeline:
 # src = "../data/bus/bus_7damage.ply"
 # tgt = "../data/bus/bus_4damage.ply"
 
+
 src = "../data/bus/bus_damagev3.ply"
 tgt = "../data/bus/bus_v2.ply"
 
@@ -258,27 +261,28 @@ cluster_samples = 150
 
 
 # Bus
-pip = Pipeline(
-    src,
-    tgt,
-    plane_fit_dist_th=None,
-    sor_neighbours=100,
-    sor_std=1.2,
-    voxel_size=5,
-    sigma_thresh=4.0,
-    percentile=80.0,
-    crop=True,
-    cluster_eps=cluster_eps,
-    cluster_min_samples=cluster_samples,
-    fast_cluster=False,
-    min_fitness=0.98,
-    visualise=True,
-    benchmark=False,
-    cc=False,
-    c2c=False,
-    m3c2=True,
-    skip_reg=False,
-    write=False,
-)
+# pip = Pipeline(
+#     src,
+#     tgt,
+#     plane_fit_dist_th=None,
+#     select_hull=False,
+#     sor_neighbours=100,
+#     sor_std=1.2,
+#     voxel_size=5,
+#     sigma_thresh=4.0,
+#     percentile=80.0,
+#     crop=True,
+#     cluster_eps=cluster_eps,
+#     cluster_min_samples=cluster_samples,
+#     fast_cluster=False,
+#     min_fitness=0.98,
+#     visualise=True,
+#     benchmark=False,
+#     cc=False,
+#     c2c=False,
+#     m3c2=True,
+#     skip_reg=False,
+#     write=False,
+# )
 
-pip.run()
+# pip.run()

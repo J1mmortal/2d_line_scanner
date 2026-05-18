@@ -1,58 +1,64 @@
-import open3d as o3d
-import numpy as np
-import copy
-import matplotlib.pyplot as plt
+from pipeline import Pipeline
 
-from registration import Registration
-from damage_detection import DamageDetector
+# Point clouds
+src = "../data/bus/bus_damagev3.ply"
+tgt = "../data/bus/bus_v2.ply"
 
-reg = Registration(voxel_size=2)
-det = DamageDetector()
+# Initial plane / hull fitting / cropping
+plane_fit_dist_th = None
+select_hull = True
 
-# src = reg.load_pcd("../data/CC/sin_src.ply")
-# tgt = reg.load_pcd("../data/CC/sin_tgt.ply")
+# Statistical outlier removal parameters (commented values work perfectly without hull)
+sor_neighbours = 80  # 100
+sor_std = 4  # 1.2
 
-# dataset = o3d.data.DemoICPPointClouds()
-# src = o3d.io.read_point_cloud(dataset.paths[0])
-# tgt = o3d.io.read_point_cloud(dataset.paths[1])
+# Registsration parameters
+voxel_size = 5
+min_fitness = 0.98
 
-# tgt = o3d.io.read_point_cloud("../data/CC/TGT.ply")
-# src = o3d.io.read_point_cloud("../data/CC/SRC.ply")
+# Noise estimation parameters
+sigma_thresh = 4.0
+percentile = 80.0
 
-src = o3d.io.read_point_cloud("../data/Reg_block_tripledented_abrupt_50000.ply")
-tgt = o3d.io.read_point_cloud("../data/Reg_block_2_smooth.ply")
+# Clustering parameters
+cluster_eps = 1.1  # 1.5
+cluster_samples = 210  # 150
+fast_cluster = False
 
-o3d.visualization.draw_geometries([src])
-o3d.visualization.draw_geometries([tgt])
+# CloudCompare parameters
+cc = False
+c2c = False
+m3c2 = True
 
+# Flags
+visualise = True
+benchmark = False
+skip_reg = False
+write = False
+crop = True
 
-# reg.set_voxel(src, ratio=0.005, coarse_ratio=0.01)
+pip = Pipeline(
+    src,
+    tgt,
+    plane_fit_dist_th=plane_fit_dist_th,
+    select_hull=select_hull,
+    sor_neighbours=sor_neighbours,
+    sor_std=sor_std,
+    voxel_size=voxel_size,
+    sigma_thresh=sigma_thresh,
+    percentile=percentile,
+    crop=crop,
+    cluster_eps=cluster_eps,
+    cluster_min_samples=cluster_samples,
+    fast_cluster=fast_cluster,
+    min_fitness=min_fitness,
+    visualise=visualise,
+    benchmark=benchmark,
+    cc=cc,
+    c2c=c2c,
+    m3c2=m3c2,
+    skip_reg=skip_reg,
+    write=write,
+)
 
-# o3d.visualization.draw_geometries([src])
-# reg.visualise_result(src, tgt)
-
-# icp, _ = reg.register(src, tgt)
-
-# reg.visualise_result(src, tgt)
-# reg.visualise_result(src, tgt, transform=icp.transformation)
-
-results = []
-
-# 1. Benchmark RANSAC (Global)
-global_benchmark = reg.benchmark_global_method(src, tgt)
-results.append(global_benchmark)
-
-# Extract the initial guess for the local methods
-init_guess = global_benchmark["transformation"]
-
-# 2. Benchmark ICP variants (Local)
-if global_benchmark["success"]:
-    results.append(reg.benchmark_method(reg.icp, src, tgt, init_guess))
-    results.append(reg.benchmark_method(reg.plane_icp, src, tgt, init_guess))
-    results.append(reg.benchmark_method(reg.gen_icp, src, tgt, init_guess))
-
-# 3. Print the unified table
-reg.print_result_summary(results)
-
-tf = results[3]["transformation"]
-reg.visualise_result(src, tgt, transform=tf, downsample=0.008)
+pip.run()
