@@ -10,11 +10,16 @@ reg = Registration(10)
 det = DamageDetector()
 
 # tgt_p = "../data/bus/bus_damagev3.ply"
-tgt_p = "../data/bus/bus_v2.ply"
+# tgt_p = "../data/bus/bus_v2.ply"
+
+tgt_p = "../data/bus/bus3.ply"
+tgt_p = "../data/bus/damage3.ply"
+tgt_p = "../data/bus/damage_80fps.ply"
 
 tgt = reg.load_pcd(tgt_p)
+# tgt, _ = reg.SOR(tgt, 60, 4)
 
-det.select_bus_hull(tgt, eps=2.1)
+det.select_bus_hull(tgt, eps=2.0)
 
 # def find_largest_cluster(pcd, labels):
 #     xyz = np.asarray(pcd.points)

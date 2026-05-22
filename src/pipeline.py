@@ -74,8 +74,9 @@ class Pipeline:
         self.tgt = self.reg.load_pcd(target_path).transform(self.reg.tf)
 
         if self.select_hull:
-            self.src = self.det.select_bus_hull(self.src, eps=2.0, visualise=False)
-            self.tgt = self.det.select_bus_hull(self.tgt, eps=2.1, visualise=False)
+            if not skip_reg:
+                self.src = self.det.select_bus_hull(self.src, eps=2.0, visualise=False)
+            self.tgt = self.det.select_bus_hull(self.tgt, eps=2.05, visualise=False)
 
         # self.src = self.det.crop_wheels_circular(self.src)
         # self.tgt = self.det.crop_wheels_circular(self.tgt)
@@ -182,17 +183,19 @@ class Pipeline:
             self.mask = self.distances > threshold
 
         else:
-            self.mask, self.distances = self.det.detect_damage(
+            self.mask, self.distances, threshold = self.det.detect_damage(
                 self.alg_src,
                 self.tgt,
                 sigma_thresh=self.sigma_thresh,
                 percentile=self.percentile,
                 bidirectional=True,  # new gate
-                remove_outliers=False,
+                remove_outliers=True,
             )
 
+        log.info("Damage classified above a threshold of %f", threshold)
+
         if self.crop:
-            self.mask = self.det.crop_damage(self.alg_src, self.mask, 55, 40)
+            self.mask = self.det.crop_damage(self.alg_src, self.mask, 55, 30)
 
         log.info("Damage points: %d / %d", self.mask.sum(), len(self.mask))
 

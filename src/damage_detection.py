@@ -5,6 +5,7 @@ import copy
 import warnings
 import logging
 from sklearn.neighbors import KDTree
+import pandas as pd
 
 from scipy.spatial import ConvexHull, cKDTree
 from scipy.signal import medfilt, wiener
@@ -84,7 +85,7 @@ class DamageDetector:
             clean_damage_mask[damaged_indices[valid_inliers]] = True
             damage_mask = clean_damage_mask
 
-        return damage_mask, src_distances
+        return damage_mask, src_distances, threshold
 
     def cluster(
         self, aligned_source, damage_mask, eps=2.0, min_samples=10
@@ -247,7 +248,7 @@ class DamageDetector:
         if visualise:
             cropped_pcd.paint_uniform_color([0.0, 0.0, 1.0])
             o3d.visualization.draw_geometries(
-                [self.downsample(cropped_pcd)],
+                [self.downsample(cropped_pcd, voxel_ratio=0.002)],
                 window_name="Bus Hull",
                 width=1600,
                 height=1000,
@@ -435,7 +436,9 @@ class DamageDetector:
         )
 
     # Need to correctly pass the damage plane as coming from the scanner
-    def calculate_damage_metrics(self, pcd, distances, labels, cmap_name="tab20"):
+    def calculate_damage_metrics(
+        self, pcd, distances, labels, cmap_name="tab20", write_to_pd=False
+    ):
         """
         Calculates 2.5D metrics for a specific damage cluster.
         grid_res MUST be in the same physical units as your XYZ coordinates.
@@ -497,6 +500,7 @@ class DamageDetector:
             colour = self._get_closest_color_name(rgb)
 
             all_metrics[int(id)] = {
+                "centroid": mean,
                 "projected_area": projected_area,
                 "volume": volume,
                 "perimeter": perimeter,
@@ -508,11 +512,14 @@ class DamageDetector:
         print(
             "\n============================== Damage cluster metrics ================================="
         )
-        header = f"{'Cluster ID':<12}{'Area':<14}{'Volume':<14}{'Perimeter':<14}{'Max Depth':<14}{'Color (R, G, B)':<20}"
+        header = f"{'Cluster ID':<12}{'Location':<35}{'Area':<14}{'Volume':<14}{'Perimeter':<14}{'Max Depth':<14}{'Color (R, G, B)':<20}"
         print(header)
         print("-" * len(header))
 
         for cluster_id, data in sorted(all_metrics.items()):
+            centroid = np.array2string(
+                data["centroid"], precision=3, separator=", ", floatmode="fixed"
+            )
             area = f"{data['projected_area']:.6f}"
             volume = f"{data['volume']:.6f}"
             perimeter = f"{data['perimeter']:.6f}"
@@ -523,7 +530,32 @@ class DamageDetector:
             color_str = f"{colour} ({r:.2f}, {g:.2f}, {b:.2f})"
 
             print(
-                f"{cluster_id:<12}{area:<14}{volume:<14}{perimeter:<14}{depth:<14}{color_str:<20}"
+                f"{cluster_id:<12}{centroid:<35}{area:<14}{volume:<14}{perimeter:<14}{depth:<14}{color_str:<20}"
+            )
+
+        if write_to_pd:
+            rows = []
+            for cluster_id, data in all_metrics.items():
+                centroid = data["centroid"]  # Assuming shape (3,) or (2,)
+
+                row = {
+                    "run_id": "20260522_v1",  # Track runs for later comparison
+                    "cluster_id": int(cluster_id),
+                    "centroid_x": float(centroid[0]),
+                    "centroid_y": float(centroid[1]),
+                    "centroid_z": float(centroid[2]) if len(centroid) > 2 else 0.0,
+                    "projected_area": float(data["projected_area"]),
+                    "volume": float(data["volume"]),
+                    "perimeter": float(data["perimeter"]),
+                    "max_depth": float(data["max_depth"]),
+                }
+                rows.append(row)
+
+            df = pd.DataFrame(rows)
+
+            # 2. Append or write to Parquet
+            df.to_parquet(
+                "../data/damage_metrics_2.parquet", engine="pyarrow", index=False
             )
 
         return all_metrics

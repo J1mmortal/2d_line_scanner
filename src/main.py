@@ -1,28 +1,34 @@
 from pipeline import Pipeline
 
 # Point clouds
-src = "../data/bus/bus_damagev3.ply"
-tgt = "../data/bus/bus_v2.ply"
+# src = "../data/bus/bus_damagev3.ply"
+# tgt = "../data/bus/bus_v2.ply"
+
+src = "../data/bus/damage3.ply"
+tgt = "../data/bus/bus3.ply"
+
+# src = "../data/bus/damage_80fps.ply"
+# tgt = "../data/bus/bus_80fps.ply"
 
 # Initial plane / hull fitting / cropping
 plane_fit_dist_th = None
 select_hull = True
 
-# Statistical outlier removal parameters (commented values work perfectly without hull)
-sor_neighbours = 80  # 100
-sor_std = 4  # 1.2
+# Statistical outlier removal parameters (commented values work perfectly without hull, work perfectly with hull)
+sor_neighbours = None  # 100, 80
+sor_std = 4  # 1.2, 4
 
 # Registsration parameters
 voxel_size = 5
 min_fitness = 0.98
 
 # Noise estimation parameters
-sigma_thresh = 4.0
-percentile = 80.0
+sigma_thresh = 4.0  # 4.0
+percentile = 80  # 80
 
 # Clustering parameters
-cluster_eps = 1.1  # 1.5
-cluster_samples = 210  # 150
+cluster_eps = 1.3  # 1.5, 1.1
+cluster_samples = 210  # 150, 210
 fast_cluster = False
 
 # CloudCompare parameters
@@ -33,8 +39,8 @@ m3c2 = True
 # Flags
 visualise = True
 benchmark = False
-skip_reg = False
-write = False
+skip_reg = True
+write = True
 crop = True
 
 pip = Pipeline(
