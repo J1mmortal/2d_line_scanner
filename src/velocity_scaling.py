@@ -4,6 +4,7 @@ import os
 import sys
 import pandas
 import logging
+import pandas as pd
 
 from registration import Registration
 
@@ -18,9 +19,11 @@ reg = Registration(2)
 np.set_printoptions(threshold=sys.maxsize)
 
 
-def PC_velocity_correction(V_raw, T_0, T_e, FPS, C_d, PC):
+def PC_velocity_correction(V_raw, T_0, T_e, FPS, C_d, pcd):
     V = np.array(V_raw)
     T = T_e - T_0  # total time
+
+    pcd_raw = np.asarray(pcd.points)
 
     # creates a list with line indices [0, 1, 2, ..., Ln]
     total_lines = int(np.floor(T * FPS)) + 1
@@ -44,9 +47,9 @@ def PC_velocity_correction(V_raw, T_0, T_e, FPS, C_d, PC):
     y_min = round(T_0 * FPS * C_d, 4)
     y_max = round(T_e * FPS * C_d, 4)
 
-    PC_y_old = np.round(PC[:, 1], 4)
+    PC_y_old = np.round(pcd_raw[:, 1], 4)
     bus_mask = (PC_y_old >= y_min) & (PC_y_old <= y_max)
-    PC_bus = PC[bus_mask]
+    PC_bus = pcd_raw[bus_mask]
 
     # converts y values of original PC to line indices based on shared y values [0,0,0,0,1,1,1,1,1, etc.]
     _, PC_line_indices = np.unique(PC_y_old, return_inverse=True)
@@ -57,16 +60,71 @@ def PC_velocity_correction(V_raw, T_0, T_e, FPS, C_d, PC):
     # sets y values of lines to correct calculated y values
     PC_bus[:, 1] = y_line[PC_line_indices]
 
-    # check to see wether T_0, T_e and FPS are set correctly
-    if abs(PC_line_indices[-1] - total_lines) > 2:
-        print(
-            "Something went wrong with the set values",
-            ", filtered pointcloud contains {0} lines while expecting {1} lines".format(
-                line_indices[-1], total_lines
-            ),
-        )
+    PC_corrected_o3d = o3d.geometry.PointCloud()
+    PC_corrected_o3d.points = o3d.utility.Vector3dVector(PC_bus)
+    PC_corrected_o3d.paint_uniform_color([1, 0.2, 0])
 
-    return PC_bus
+    # check to see wether T_0, T_e and FPS are set correctly
+    # if abs(PC_line_indices[-1] - total_lines) > 2:
+    #     print(
+    #         "Something went wrong with the set values",
+    #         ", filtered pointcloud contains {0} lines while expecting {1} lines".format(
+    #             line_indices[-1], total_lines
+    #         ),
+    #     )
+
+    return PC_corrected_o3d
+
+
+def PC_velocity_correction_v2(csv_path, T_0, T_e, FPS, C_d, pcd):
+    # Load velocity profile from CSV
+    df = pd.read_csv(csv_path)
+    V_time = df["time_s"].values
+    V_speed = df["velocity_steps_per_s"].values
+
+    T = T_e - T_0  # total time duration
+
+    pcd_raw = np.asarray(pcd.points)
+
+    # Creates a list with line indices [0, 1, 2, ..., Ln]
+    total_lines = int(np.floor(T * FPS)) + 1
+    line_indices = np.arange(total_lines)
+
+    # Converts time to line numbers relative to T_0
+    V_line_known = (V_time - T_0) * FPS
+
+    # Linearly interpolates velocity to every expected line index
+    V_line = np.interp(line_indices, V_line_known, V_speed)
+    d_line = V_line / FPS  # Delta distance per frame
+
+    # Cumulative sum to find absolute positions along the travel axis
+    y_line = np.zeros(total_lines)
+    y_line[1:] = np.cumsum(d_line[:-1])
+
+    # Crop point cloud bounds based on nominal limits
+    y_min = round(T_0 * FPS * C_d, 4)
+    y_max = round(T_e * FPS * C_d, 4)
+
+    PC_y_old = np.round(pcd_raw[:, 1], 4)
+    bus_mask = (PC_y_old >= y_min) & (PC_y_old <= y_max)
+    PC_bus = pcd_raw[bus_mask]
+
+    # FIX: Compute line indices on the cropped subset to prevent shape mismatch
+    PC_bus_y_old = np.round(PC_bus[:, 1], 4)
+    _, PC_line_indices = np.unique(PC_bus_y_old, return_inverse=True)
+
+    # Bound indices to prevent out-of-bounds errors
+    PC_line_indices = np.clip(PC_line_indices, 0, total_lines - 1)
+
+    # Assign the corrected profile-derived coordinates
+    PC_bus[:, 1] = y_line[PC_line_indices]
+
+    # Reconstruct the Open3D PointCloud object
+    PC_corrected_o3d = o3d.geometry.PointCloud()
+    PC_corrected_o3d.points = o3d.utility.Vector3dVector(PC_bus)
+    PC_corrected_o3d.paint_uniform_color([1, 0.2, 0])
+
+    return PC_corrected_o3d
 
 
 if __name__ == "__main__":
@@ -103,25 +161,28 @@ if __name__ == "__main__":
     # src = reg.downsample(src, ratio=0.001)
     src_raw = np.asarray(src.points)
 
-    PC_corrected = PC_velocity_correction(v_noisy, T_0, T_e, FPS, C_d, src_raw)
-    print(f"Original point-cloud shape: {src_raw.shape}")
-    print(f"Corrected point_cloud shape: {PC_corrected.shape}")
+    csv_p = r"..\data\speed_test_values.csv"
+
+    # PC_corrected = PC_velocity_correction(v_noisy, T_0, T_e, FPS, C_d, src_raw)
+    PC_corrected = PC_velocity_correction_v2(csv_p, T_0, T_e, FPS, C_d, src)
+    # print(f"Original point-cloud shape: {src_raw.shape}")
+    # print(f"Corrected point_cloud shape: {PC_corrected.scale}")
 
     # converts the PC from the numpy array back to a downloadable o3d file
-    PC_corrected_o3d = o3d.geometry.PointCloud()
-    PC_corrected_o3d.points = o3d.utility.Vector3dVector(PC_corrected)
-    PC_corrected_o3d.paint_uniform_color([1, 0.2, 0])
-    PC_corrected_o3d = reg.downsample(PC_corrected_o3d, ratio=0.001)
+    # PC_corrected_o3d = o3d.geometry.PointCloud()
+    # PC_corrected_o3d.points = o3d.utility.Vector3dVector(PC_corrected)
+    # PC_corrected_o3d.paint_uniform_color([1, 0.2, 0])
+    PC_corrected = reg.downsample(PC_corrected, ratio=0.001)
 
     # downloads the pointcloud as ply
     o3d.visualization.draw_geometries([reg.downsample(src, ratio=0.002)])
-    o3d.visualization.draw_geometries([reg.downsample(PC_corrected_o3d, ratio=0.002)])
+    o3d.visualization.draw_geometries([reg.downsample(PC_corrected, ratio=0.002)])
 
     # icp, _, _ = reg.register(PC_corrected_o3d, tgt)
-    icp = reg.get_initial_guess(PC_corrected_o3d, tgt)
+    icp = reg.get_initial_guess(PC_corrected, tgt)
     o3d.visualization.draw_geometries(
         [
-            reg.downsample(PC_corrected_o3d.transform(icp.transformation), ratio=0.002),
+            reg.downsample(PC_corrected.transform(icp.transformation), ratio=0.002),
             reg.downsample(tgt, ratio=0.002),
         ]
     )
@@ -130,7 +191,7 @@ if __name__ == "__main__":
     extent = bbox.get_extent()
     max_dimension = np.max(extent)
 
-    bbox1 = PC_corrected_o3d.get_axis_aligned_bounding_box()
+    bbox1 = PC_corrected.get_axis_aligned_bounding_box()
     extent1 = bbox1.get_extent()
     max_dimension1 = np.max(extent1)
 

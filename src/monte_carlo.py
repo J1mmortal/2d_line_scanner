@@ -1,6 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import open3d as o3d
+import pandas as pd
 import seaborn as sns
 from registration import Registration
 from tqdm import tqdm
@@ -8,65 +9,62 @@ from tqdm import tqdm
 reg = Registration(2)
 
 
-def PC_velocity_correction(V_raw, T_0, T_e, FPS, C_d, pcd):
-    V = np.array(V_raw)
-    T = T_e - T_0  # total time
+def velocity_correction(csv_or_df, T_0, T_e, fps, C_d, pcd):
+    if isinstance(csv_or_df, str):
+        df = pd.read_csv(csv_or_df)
+    else:
+        df = csv_or_df
+
+    v_time = df["time_s"].values
+    v_speed = df["velocity_steps_per_s"].values
+
+    t_tot = T_e - T_0  # total time duration
 
     pcd_raw = np.asarray(pcd.points)
 
-    # creates a list with line indices [0, 1, 2, ..., Ln]
-    total_lines = int(np.floor(T * FPS)) + 1
+    # Creates a list with line indices [0, 1, 2, ..., Ln]
+    total_lines = int(np.floor(t_tot * fps)) + 1
     line_indices = np.arange(total_lines)
 
-    # converts the first collumn of the V matrix from time to line number (negative before T_0)
-    V_line_known = (V[:, 0] - T_0) * FPS
-    speeds = V[:, 1]
+    # Converts time to line numbers relative to T_0
+    v_line_known = (v_time - T_0) * fps
 
-    # linearily interpolates V_line_known to every line (auto-filters <T_0)
-    V_line = np.interp(line_indices, V_line_known, speeds)
-    d_line = V_line / FPS  # converts V (mm/s) to d (mm) between the lines
+    # Linearly interpolates velocity to every expected line index
+    v_line = np.interp(line_indices, v_line_known, v_speed)
+    d_line = v_line / fps  # Delta distance per frame
 
-    # sums up the distances between lines to get the absolute y value of each line
+    # Cumulative sum to find absolute positions along the travel axis
     y_line = np.zeros(total_lines)
-    y_line[1:] = np.cumsum(
-        d_line[:-1]
-    )  # from 1 because line 0 starts at 0, and removing final one because this is the final line
+    y_line[1:] = np.cumsum(d_line[:-1])
 
-    # crops pointcloud to only contain bus (will be used later for line numbering)
-    y_min = round(T_0 * FPS * C_d, 4)
-    y_max = round(T_e * FPS * C_d, 4)
+    # Crop point cloud bounds based on nominal limits
+    y_min = round(T_0 * fps * C_d, 4)
+    y_max = round(T_e * fps * C_d, 4)
 
-    PC_y_old = np.round(pcd_raw[:, 1], 4)
-    bus_mask = (PC_y_old >= y_min) & (PC_y_old <= y_max)
-    PC_bus = pcd_raw[bus_mask]
+    pcd_y_old = np.round(pcd_raw[:, 1], 4)
+    bus_mask = (pcd_y_old >= y_min) & (pcd_y_old <= y_max)
+    pcd_bus = pcd_raw[bus_mask]
 
-    # converts y values of original PC to line indices based on shared y values [0,0,0,0,1,1,1,1,1, etc.]
-    _, PC_line_indices = np.unique(PC_y_old, return_inverse=True)
+    # FIX: Compute line indices on the cropped subset to prevent shape mismatch
+    pcd_bus_y_old = np.round(pcd_bus[:, 1], 4)
+    _, PC_line_indices = np.unique(pcd_bus_y_old, return_inverse=True)
 
-    # bugfix
+    # Bound indices to prevent out-of-bounds errors
     PC_line_indices = np.clip(PC_line_indices, 0, total_lines - 1)
 
-    # sets y values of lines to correct calculated y values
-    PC_bus[:, 1] = y_line[PC_line_indices]
+    # Assign the corrected profile-derived coordinates
+    pcd_bus[:, 1] = y_line[PC_line_indices]
 
+    # Reconstruct the Open3D PointCloud object
     PC_corrected_o3d = o3d.geometry.PointCloud()
-    PC_corrected_o3d.points = o3d.utility.Vector3dVector(PC_bus)
+    PC_corrected_o3d.points = o3d.utility.Vector3dVector(pcd_bus)
     PC_corrected_o3d.paint_uniform_color([1, 0.2, 0])
-
-    # check to see wether T_0, T_e and FPS are set correctly
-    # if abs(PC_line_indices[-1] - total_lines) > 2:
-    #     print(
-    #         "Something went wrong with the set values",
-    #         ", filtered pointcloud contains {0} lines while expecting {1} lines".format(
-    #             line_indices[-1], total_lines
-    #         ),
-    #     )
 
     return PC_corrected_o3d
 
 
 def run_velocity_monte_carlo(
-    pcd, tgt, v_raw_base, params, num_iterations=100, noise_std=0.5
+    pcd, tgt, csv_path, params, num_iterations=100, noise_std=0.5
 ):
     """
     Runs a Monte Carlo simulation by adding Gaussian noise to the measured
@@ -81,18 +79,20 @@ def run_velocity_monte_carlo(
     fps = params["FPS"]
     c_d = params["C_d"]
 
+    df_base = pd.read_csv(csv_path)
+
     for i in tqdm(range(num_iterations)):
         # 1. Deep copy baseline velocity to prevent noise accumulation across loops
-        v_noisy = np.array(v_raw_base, dtype=float)
+        df_noisy = df_base.copy()
 
-        # 2. Apply Gaussian noise to the speed column (index 1)
-        noise = np.random.normal(loc=0.0, scale=noise_std, size=v_noisy.shape[0])
-        v_noisy[:, 1] += noise
+        # 2. Apply Gaussian noise to the speed column
+        noise = np.random.normal(loc=0.0, scale=noise_std, size=len(df_noisy))
+        df_noisy["velocity_steps_per_s"] += noise
 
         # 3. Execute velocity correction
         try:
             # Note: Ensure you fix the shape bug in PC_velocity_correction before calling
-            pc_corrected = PC_velocity_correction(v_noisy, t_0, t_e, fps, c_d, pcd)
+            pc_corrected = velocity_correction(df_noisy, t_0, t_e, fps, c_d, pcd)
 
             # 4. Calculate registration metrics
             ransac_result = reg.get_initial_guess(pc_corrected, tgt)
@@ -232,7 +232,7 @@ def plot_monte_carlo_results(rmse_results, noise_std):
 
 
 def run_noise_grid_sweep(
-    pcd, gt_pcd, v_raw_base, params, means_range, stds_range, mc_iterations=10
+    pcd, gt_pcd, csv_path, params, means_range, stds_range, mc_iterations=10
 ):
     """
     Sweeps a 2D grid of noise mean (bias) and std dev (jitter).
@@ -246,6 +246,8 @@ def run_noise_grid_sweep(
 
     t_0, t_e, fps, c_d = params["T_0"], params["T_e"], params["FPS"], params["C_d"]
 
+    df_base = pd.read_csv(csv_path)
+
     # Iterate through the grid
     for s_idx, sigma in enumerate(tqdm(stds_range)):
         for m_idx, mean in enumerate(means_range):
@@ -254,21 +256,23 @@ def run_noise_grid_sweep(
             rsc_results = []
             pcds = []
 
-            for _ in range(mc_iterations):
-                v_noisy = np.array(v_raw_base, dtype=float)
+            for _ in tqdm(range(mc_iterations)):
+                df_noisy = df_base.copy()
 
                 # Apply Gaussian noise with specific mean and std dev
-                noise = np.random.normal(loc=mean, scale=sigma, size=v_noisy.shape[0])
-                v_noisy[:, 1] += noise
+                noise = np.random.normal(loc=mean, scale=sigma, size=len(df_noisy))
+                df_noisy["velocity_steps_per_s"] += noise
 
                 try:
-                    pc_corrected = PC_velocity_correction(
-                        v_noisy, t_0, t_e, fps, c_d, pcd
+                    pc_corrected = velocity_correction(
+                        df_noisy, t_0, t_e, fps, c_d, pcd
                     )
 
                     # 4. Calculate registration metrics
-                    # ransac_result, _, _ = reg.register(pc_corrected, gt_pcd)
-                    ransac_result = reg.get_initial_guess(pc_corrected, gt_pcd)
+                    ransac_result, _, _ = reg.register(
+                        pc_corrected, gt_pcd, ransac_retries=3
+                    )
+                    # ransac_result = reg.get_initial_guess(pc_corrected, gt_pcd)
 
                     fitness = ransac_result.fitness
                     rmse = ransac_result.inlier_rmse
@@ -296,7 +300,7 @@ def run_noise_grid_sweep(
         yticklabels=[f"{s:.1f}" for s in stds_range],
         cmap="viridis",
         annot=True,
-        fmt=".2f",
+        fmt=".3f",
         cbar_kws={"label": "Mean Registration RMSE (mm)"},
     )
     plt.title("RMSE Sensitivity Matrix: Velocity Bias ($\mu$) vs. Jitter ($\sigma$)")
@@ -312,7 +316,7 @@ def run_noise_grid_sweep(
         yticklabels=[f"{s:.1f}" for s in stds_range],
         cmap="viridis",
         annot=True,
-        fmt=".2f",
+        fmt=".3f",
         cbar_kws={"label": "Mean Registration RMSE (mm)"},
     )
     plt.title("Fitness Sensitivity Matrix: Velocity Bias ($\mu$) vs. Jitter ($\sigma$)")
@@ -342,6 +346,8 @@ if __name__ == "__main__":
 
     sim_params = {"T_0": 1.77996, "T_e": 25.6254, "FPS": 1000, "C_d": 0.01}
 
+    v_csv = r"..\data\speed_test_values.csv"
+
     # Generate temporary dummy point clouds for script verification
     # Replace these with your actual numpy data arrays
     # np.random.seed(8)
@@ -354,11 +360,16 @@ if __name__ == "__main__":
     src = reg.load_pcd(src_p)
     # src = reg.downsample(src, ratio=0.001)
 
+    src = reg.downsample(src, ratio=0.00075)
+    tgt = reg.downsample(tgt, ratio=0.00075)
+
+    reg.set_voxel(src, ratio=0.01)
+
     # Run simulation with 50 iterations and a standard deviation of 1.5 mm/s on speed
     # rmse, fitness = run_velocity_monte_carlo(
     #     pc_raw=src_raw,
     #     tgt=tgt,
-    #     v_raw_base=V_base,
+    #     csv_path = v_csv,
     #     params=sim_params,
     #     num_iterations=50,
     #     noise_std=1.5,
@@ -369,11 +380,11 @@ if __name__ == "__main__":
 
     # Execution Example:
     # list of biases to test (e.g., odometer under-registering or over-registering)
-    means = np.linspace(-0.3, 0.3, 5)
+    means = np.linspace(-0.3, 0.3, 10)
     # list of random noise levels to test
-    stds = np.linspace(0.0, 0.3, 5)
+    stds = np.linspace(0.0, 0.3, 10)
     rmsegrid, fitnessgrid, ransacgrid = run_noise_grid_sweep(
-        src, tgt, V_base, sim_params, means, stds, mc_iterations=5
+        src, tgt, v_csv, sim_params, means, stds, mc_iterations=8
     )
 
     topleft = ransacgrid[0, 0]

@@ -39,7 +39,7 @@ m3c2 = True
 # Flags
 visualise = True
 benchmark = False
-skip_reg = True
+skip_reg = False
 write = True
 crop = True
 

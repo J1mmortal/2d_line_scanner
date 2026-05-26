@@ -537,9 +537,9 @@ class Registration:
 
         # 2. Benchmark ICP variants (Local)
         if global_benchmark["success"]:
-            results.append(self.benchmark_method(self.icp, src, tgt, init_guess))
-            results.append(self.benchmark_method(self.plane_icp, src, tgt, init_guess))
-            results.append(self.benchmark_method(self.gen_icp, src, tgt, init_guess))
+            # results.append(self.benchmark_method(self.icp, src, tgt, init_guess))
+            # results.append(self.benchmark_method(self.plane_icp, src, tgt, init_guess))
+            # results.append(self.benchmark_method(self.gen_icp, src, tgt, init_guess))
             results.append(
                 self.benchmark_method(self.multi_scale_icp, src, tgt, init_guess)
             )
