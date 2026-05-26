@@ -239,8 +239,14 @@ class DamageDetector:
         if visualise:
             self.color_point_cloud_by_labels(pcd, labels)
 
+        valid_labels = labels[labels != -1]  # ignore noise
+        if len(valid_labels) == 0:
+            raise RuntimeError("Invalid clustering, check eps and min_samples values")
+
+        largest_label = np.bincount(valid_labels).argmax()
+
         xyz = np.asarray(pcd.points)
-        cropped_xyz = xyz[labels == 0]
+        cropped_xyz = xyz[labels == largest_label]
 
         cropped_pcd = o3d.geometry.PointCloud()
         cropped_pcd.points = o3d.utility.Vector3dVector(cropped_xyz)

@@ -4,30 +4,35 @@ import open3d as o3d
 import pandas as pd
 import seaborn as sns
 from registration import Registration
+from damage_detection import DamageDetector
 from tqdm import tqdm
 
-reg = Registration(2)
+reg = Registration(5)
+det = DamageDetector()
 
 
-def velocity_correction(csv_or_df, T_0, T_e, fps, C_d, pcd):
+def velocity_correction(csv_or_df, fps, C_d, pcd):
     if isinstance(csv_or_df, str):
         df = pd.read_csv(csv_or_df)
     else:
         df = csv_or_df
 
-    v_time = df["time_s"].values
-    v_speed = df["velocity_steps_per_s"].values
-
-    t_tot = T_e - T_0  # total time duration
+    v_time = df["Time_s"].values
+    v_speed = df["Speed_mms"].values
 
     pcd_raw = np.asarray(pcd.points)
+
+    t_0 = 1e-3 * pcd_raw[:, 1][0] / C_d
+    t_e = 1e-3 * pcd_raw[:, 1][-1] / C_d
+
+    t_tot = t_e - t_0
 
     # Creates a list with line indices [0, 1, 2, ..., Ln]
     total_lines = int(np.floor(t_tot * fps)) + 1
     line_indices = np.arange(total_lines)
 
     # Converts time to line numbers relative to T_0
-    v_line_known = (v_time - T_0) * fps
+    v_line_known = (v_time - t_0) * fps
 
     # Linearly interpolates velocity to every expected line index
     v_line = np.interp(line_indices, v_line_known, v_speed)
@@ -38,8 +43,8 @@ def velocity_correction(csv_or_df, T_0, T_e, fps, C_d, pcd):
     y_line[1:] = np.cumsum(d_line[:-1])
 
     # Crop point cloud bounds based on nominal limits
-    y_min = round(T_0 * fps * C_d, 4)
-    y_max = round(T_e * fps * C_d, 4)
+    y_min = round(t_0 * fps * C_d, 4)
+    y_max = round(t_e * fps * C_d, 4)
 
     pcd_y_old = np.round(pcd_raw[:, 1], 4)
     bus_mask = (pcd_y_old >= y_min) & (pcd_y_old <= y_max)
@@ -53,6 +58,65 @@ def velocity_correction(csv_or_df, T_0, T_e, fps, C_d, pcd):
     PC_line_indices = np.clip(PC_line_indices, 0, total_lines - 1)
 
     # Assign the corrected profile-derived coordinates
+    pcd_bus[:, 1] = y_line[PC_line_indices]
+
+    # Reconstruct the Open3D PointCloud object
+    PC_corrected_o3d = o3d.geometry.PointCloud()
+    PC_corrected_o3d.points = o3d.utility.Vector3dVector(pcd_bus)
+    PC_corrected_o3d.paint_uniform_color([1, 0.2, 0])
+
+    return PC_corrected_o3d
+
+
+def velocity_correction2(csv_or_df, fps, C_d, pcd):
+    if isinstance(csv_or_df, str):
+        df = pd.read_csv(csv_or_df)
+    else:
+        df = csv_or_df
+
+    v_time = df["Time_s"].values
+    v_speed = df["Speed_mms"].values
+
+    pcd_raw = np.asarray(pcd.points)
+
+    # Use robust global min/max instead of assuming index 0 and -1 are sorted
+    y_min_raw = pcd_raw[:, 1].min()
+    y_max_raw = pcd_raw[:, 1].max()
+
+    t_0 = 1e-3 * y_min_raw / C_d
+    t_e = 1e-3 * y_max_raw / C_d
+    t_tot = t_e - t_0
+
+    # Create line indices list
+    total_lines = int(np.floor(t_tot * fps)) + 1
+    line_indices = np.arange(total_lines)
+
+    # Map time to expected relative line indices
+    v_line_known = (v_time - t_0) * fps
+    v_line = np.interp(line_indices, v_line_known, v_speed)
+    d_line = v_line / fps
+
+    # Integrate velocity profile
+    y_line = np.zeros(total_lines)
+    y_line[1:] = np.cumsum(d_line[:-1])
+
+    y_min = t_0 * fps * C_d
+    y_max = t_e * fps * C_d
+
+    pcd_y_old = pcd_raw[:, 1]
+    bus_mask = (pcd_y_old >= y_min) & (pcd_y_old <= y_max)
+
+    # Avoid slow fancy indexing if all points are within boundaries
+    if np.all(bus_mask):
+        pcd_bus = pcd_raw.copy()
+    else:
+        pcd_bus = pcd_raw[bus_mask]
+
+    # Optimized direct arithmetic bucket mapping replaces np.unique
+    PC_line_indices = np.round((pcd_bus[:, 1] - y_min) / C_d).astype(np.int32)
+    np.clip(PC_line_indices, 0, total_lines - 1, out=PC_line_indices)
+
+    # Apply profile-derived coordinates
     pcd_bus[:, 1] = y_line[PC_line_indices]
 
     # Reconstruct the Open3D PointCloud object
@@ -87,12 +151,12 @@ def run_velocity_monte_carlo(
 
         # 2. Apply Gaussian noise to the speed column
         noise = np.random.normal(loc=0.0, scale=noise_std, size=len(df_noisy))
-        df_noisy["velocity_steps_per_s"] += noise
+        df_noisy["Speed_mms"] += noise
 
         # 3. Execute velocity correction
         try:
             # Note: Ensure you fix the shape bug in PC_velocity_correction before calling
-            pc_corrected = velocity_correction(df_noisy, t_0, t_e, fps, c_d, pcd)
+            pc_corrected = velocity_correction(df_noisy, fps, c_d, pcd)
 
             # 4. Calculate registration metrics
             ransac_result = reg.get_initial_guess(pc_corrected, tgt)
@@ -232,7 +296,14 @@ def plot_monte_carlo_results(rmse_results, noise_std):
 
 
 def run_noise_grid_sweep(
-    pcd, gt_pcd, csv_path, params, means_range, stds_range, mc_iterations=10
+    pcd,
+    gt_pcd,
+    csv_path,
+    params,
+    means_range,
+    stds_range,
+    mc_iterations=10,
+    uniform_donwsample=False,
 ):
     """
     Sweeps a 2D grid of noise mean (bias) and std dev (jitter).
@@ -248,6 +319,13 @@ def run_noise_grid_sweep(
 
     df_base = pd.read_csv(csv_path)
 
+    if uniform_donwsample:
+        tgt_reg = gt_pcd.uniform_down_sample(20)
+        reg.set_voxel(tgt_reg, ratio=0.03)
+    else:
+        tgt_reg = reg.downsample(gt_pcd, ratio=0.001)
+        reg.set_voxel(tgt_reg, ratio=0.03)
+
     # Iterate through the grid
     for s_idx, sigma in enumerate(tqdm(stds_range)):
         for m_idx, mean in enumerate(means_range):
@@ -256,31 +334,46 @@ def run_noise_grid_sweep(
             rsc_results = []
             pcds = []
 
-            for _ in tqdm(range(mc_iterations)):
+            for _ in range(mc_iterations):
                 df_noisy = df_base.copy()
 
                 # Apply Gaussian noise with specific mean and std dev
                 noise = np.random.normal(loc=mean, scale=sigma, size=len(df_noisy))
-                df_noisy["velocity_steps_per_s"] += noise
+                df_noisy["Speed_mms"] += noise
 
                 try:
-                    pc_corrected = velocity_correction(
-                        df_noisy, t_0, t_e, fps, c_d, pcd
-                    )
+                    pc_corrected = velocity_correction2(df_noisy, fps, c_d, pcd)
+                    # pc_corrected = det.select_bus_hull(
+                    #     pc_corrected, eps=2.0, visualise=False
+                    # )
+
+                    if uniform_donwsample:
+                        pc_reg = pc_corrected.uniform_down_sample(20)
+                    else:
+                        pc_reg = reg.downsample(pc_corrected, ratio=0.001)
+
+                    icp, _, _ = reg.register(pc_reg, tgt_reg, ransac_retries=3)
 
                     # 4. Calculate registration metrics
-                    ransac_result, _, _ = reg.register(
-                        pc_corrected, gt_pcd, ransac_retries=3
-                    )
-                    # ransac_result = reg.get_initial_guess(pc_corrected, gt_pcd)
+                    # icp, _, _ = reg.register(
+                    #     pc_corrected, gt_pcd, ransac_retries=3
+                    # )
+                    # icp = reg.get_initial_guess(pc_corrected, gt_pcd)
 
-                    fitness = ransac_result.fitness
-                    rmse = ransac_result.inlier_rmse
+                    eval = reg.evaluate_alignment(
+                        pc_corrected, gt_pcd, icp.transformation
+                    )
+
+                    fitness = eval.fitness
+                    rmse = eval.inlier_rmse
+
+                    # fitness = icp.fitness
+                    # rmse = icp.inlier_rmse
 
                     iter_fitness.append(fitness)
                     iter_rmse.append(rmse)
 
-                    pc_corrected = pc_corrected.transform(ransac_result.transformation)
+                    pc_corrected = pc_corrected.transform(icp.transformation)
                 except Exception:
                     continue
 
@@ -335,62 +428,59 @@ def run_noise_grid_sweep(
 # Setup execution context
 if __name__ == "__main__":
     # Define baseline inputs based on your specifications
-    V_base = [
-        (0, 12 * 1.0432),
-        (7.999, 12 * 1.0432),
-        (8, 36 * 1.0432),
-        (11.999, 36 * 1.0432),
-        (12, 12 * 1.0432),
-        (30, 12 * 1.0432),
-    ]
+    T_0 = 1.77996  # time at which bus first seen by scanner (y_0 = T_0 * FPS * C_d)
+    T_e = 25.6254  # time at which bus last seen by scanner (y_e = T_e * FPS * C_d)
+    FPS = 1000  # internal 2D laser profiler FPS
+    C_d = 0.1  # configured laser profile y distance (constant)
+    sim_params = {"T_0": 1.77996, "T_e": 25.6254, "FPS": 1000, "C_d": 0.1}
+    # v_csv = r"..\data\speed_test_values.csv"
+    v_csv = r"..\data\bus_kinematics.csv"
 
-    sim_params = {"T_0": 1.77996, "T_e": 25.6254, "FPS": 1000, "C_d": 0.01}
-
-    v_csv = r"..\data\speed_test_values.csv"
-
-    # Generate temporary dummy point clouds for script verification
-    # Replace these with your actual numpy data arrays
     # np.random.seed(8)
 
     tgt_p = r"..\data\bus\bus_v2.ply"
     tgt = reg.load_pcd(tgt_p)
-    # tgt = reg.downsample(tgt, ratio=0.001)
+    # tgt = det.select_bus_hull(tgt, eps=2.0, visualise=False)
+    tgt.paint_uniform_color([0.0, 1.0, 0.0])
 
-    src_p = r"..\data\bus\snelheid_test.ply"
+    src_p = r"..\data\bus\snelheid_test2.ply"
     src = reg.load_pcd(src_p)
-    # src = reg.downsample(src, ratio=0.001)
-
-    src = reg.downsample(src, ratio=0.00075)
-    tgt = reg.downsample(tgt, ratio=0.00075)
-
-    reg.set_voxel(src, ratio=0.01)
 
     # Run simulation with 50 iterations and a standard deviation of 1.5 mm/s on speed
     # rmse, fitness = run_velocity_monte_carlo(
-    #     pc_raw=src_raw,
+    #     src,
     #     tgt=tgt,
-    #     csv_path = v_csv,
+    #     csv_path=v_csv,
     #     params=sim_params,
     #     num_iterations=50,
-    #     noise_std=1.5,
+    #     noise_std=0.5,
     # )
 
-    # plot_monte_carlo_results(rmse, noise_std=1.5)
-    # plot_monte_carlo_results(fitness, noise_std=1.5)
+    # plot_monte_carlo_results(rmse, noise_std=0.5)
+    # plot_monte_carlo_results(fitness, noise_std=0.5)
 
-    # Execution Example:
     # list of biases to test (e.g., odometer under-registering or over-registering)
-    means = np.linspace(-0.3, 0.3, 10)
+    means = np.linspace(-0.3, 0.3, 5)
+
     # list of random noise levels to test
-    stds = np.linspace(0.0, 0.3, 10)
+    stds = np.linspace(0.0, 0.3, 5)
+
     rmsegrid, fitnessgrid, ransacgrid = run_noise_grid_sweep(
-        src, tgt, v_csv, sim_params, means, stds, mc_iterations=8
+        src,
+        tgt,
+        v_csv,
+        sim_params,
+        means,
+        stds,
+        mc_iterations=3,
+        uniform_donwsample=True,
     )
 
     topleft = ransacgrid[0, 0]
     topright = ransacgrid[0, -1]
     bottomleft = ransacgrid[-1, 0]
     bottomright = ransacgrid[-1, -1]
+
     o3d.visualization.draw_geometries(
         [
             reg.downsample(topleft, ratio=0.002),
@@ -415,3 +505,7 @@ if __name__ == "__main__":
             reg.downsample(tgt, ratio=0.002),
         ]
     )
+    # o3d.visualization.draw_geometries([topleft, tgt])
+    # o3d.visualization.draw_geometries([topright, tgt])
+    # o3d.visualization.draw_geometries(bottomleft, tgt)
+    # o3d.visualization.draw_geometries([bottomright, tgt])
