@@ -15,12 +15,6 @@ logging.basicConfig(
 def compare_cluster_runs(
     gt_parquet_path: str, guessed_parquet_path: str, max_distance: float
 ):
-    """
-    Compares guessed cluster centroids against ground truth centroids using a distance threshold.
-
-    Returns:
-        tuple: (df_guessed_evaluated, df_gt_evaluated)
-    """
     # Load datasets
     df_gt = pd.read_parquet(gt_parquet_path)
     df_guess = pd.read_parquet(guessed_parquet_path)
