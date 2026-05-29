@@ -83,8 +83,8 @@ def velocity_correction(csv_or_df, fps, C_d, pcd):
     return PC_corrected_o3d
 
 
-# tgt = reg.load_pcd(tgt_p)
-# src = reg.load_pcd(src_p)
+tgt = reg.load_pcd(tgt_p)
+src = reg.load_pcd(src_p)
 
 # src = reg.downsample(src, ratio=0.00075)
 # tgt = reg.downsample(tgt, ratio=0.00075)
@@ -158,7 +158,7 @@ ax[1, 1].plot(time, y_a_noisy)
 ax[1, 1].scatter(sample_time, noisy_sample_speed)
 ax[1, 2].plot(time, y_p_noisy)
 ax[1, 2].scatter(sample_time, noisy_sample_speed)
-plt.show()
+# plt.show()
 
 # script_start = time.perf_counter()
 

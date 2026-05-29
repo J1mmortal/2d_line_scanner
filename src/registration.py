@@ -1,14 +1,23 @@
 import open3d as o3d
 import open3d.core as o3c
+import pandas as pd
 import numpy as np
+import matplotlib.pyplot as plt
 import copy
 import time
 import logging
 
+from scipy.signal import savgol_filter
+from scipy.interpolate import CubicSpline, Akima1DInterpolator, PchipInterpolator
+
 
 class Registration:
-    def __init__(self, voxel_size=0.05):
+    def __init__(self, voxel_size=0.05, fps=1000, C_d=0.1):
         self.voxel = voxel_size
+
+        self.fps = fps
+        self.C_d = C_d
+
         self.device = o3c.Device("CPU:0")
         self.float_dtype = o3c.float32
 
@@ -153,6 +162,101 @@ class Registration:
         # Set voxel size to X% of the largest dimension (e.g., 0.01 = 1%)
         self.voxel = max_dimension * ratio
         print(f"Max dimension: {max_dimension}; Voxel size: {self.voxel}")
+
+    def velocity_correction(
+        self,
+        csv_or_df,
+        pcd,
+        method="akima",
+        denoise=False,
+        downsample_step=60,
+        visualise=True,
+    ):
+        if isinstance(csv_or_df, str):
+            df = pd.read_csv(csv_or_df)
+        else:
+            df = csv_or_df
+
+        v_time = df["Time_s"].values
+        v_speed = df["Speed_mms"].values
+
+        if denoise:
+            v_speed = savgol_filter(v_speed, window_length=101, polyorder=3)
+
+        pcd_raw = np.asarray(pcd.points)
+        y_min_raw = pcd_raw[:, 1].min()
+        y_max_raw = pcd_raw[:, 1].max()
+
+        t_0 = 1e-3 * y_min_raw / self.C_d
+        t_e = 1e-3 * y_max_raw / self.C_d
+        t_tot = t_e - t_0
+
+        total_lines = int(np.floor(t_tot * self.fps)) + 1
+        line_indices = np.arange(total_lines)
+
+        # Target timestamps for each discrete line profile
+        t_line = t_0 + line_indices / self.fps
+
+        method = method.lower()
+        # Ensure there are enough points for higher-order splines
+        if method in ["cubic", "akima", "pchip"] and len(v_time) > (
+            downsample_step * 4
+        ):
+            sample_time = v_time[::downsample_step]
+            sample_speed = v_speed[::downsample_step]
+
+            # Explicitly append boundary endpoints to minimize edge errors
+            if sample_time[-1] != v_time[-1]:
+                sample_time = np.append(sample_time, v_time[-1])
+                sample_speed = np.append(sample_speed, v_speed[-1])
+
+            # Protect against out-of-bounds NaNs and boundary oscillations
+            t_line_clipped = np.clip(t_line, sample_time[0], sample_time[-1])
+
+            if method == "cubic":
+                spline_func = CubicSpline(sample_time, sample_speed, bc_type="natural")
+            elif method == "akima":
+                spline_func = Akima1DInterpolator(sample_time, sample_speed)
+            elif method == "pchip":
+                spline_func = PchipInterpolator(sample_time, sample_speed)
+
+            v_line = spline_func(t_line_clipped)
+
+            if visualise:
+                fig, ax = plt.subplots(1, 1)
+                ax.plot(t_line_clipped, v_line)
+                ax.scatter(sample_time, sample_speed)
+                plt.show()
+        else:
+            # Fallback to standard linear interpolation if data is too small or 'linear' is chosen
+            v_line_known = (v_time - t_0) * self.fps
+            v_line = np.interp(line_indices, v_line_known, v_speed)
+
+        d_line = v_line / self.fps
+        y_line = np.zeros(total_lines)
+        y_line[1:] = np.cumsum(d_line[:-1])
+
+        y_min = t_0 * self.fps * self.C_d
+        y_max = t_e * self.fps * self.C_d
+
+        pcd_y_old = pcd_raw[:, 1]
+        bus_mask = (pcd_y_old >= y_min) & (pcd_y_old <= y_max)
+
+        if np.all(bus_mask):
+            pcd_bus = pcd_raw.copy()
+        else:
+            pcd_bus = pcd_raw[bus_mask]
+
+        PC_line_indices = np.round((pcd_bus[:, 1] - y_min) / self.C_d).astype(np.int32)
+        np.clip(PC_line_indices, 0, total_lines - 1, out=PC_line_indices)
+
+        pcd_bus[:, 1] = y_line[PC_line_indices]
+
+        PC_corrected_o3d = o3d.geometry.PointCloud()
+        PC_corrected_o3d.points = o3d.utility.Vector3dVector(pcd_bus)
+        PC_corrected_o3d.paint_uniform_color([1, 0.2, 0])
+
+        return PC_corrected_o3d
 
     def preprocess(self, pcd):
         pcd_down = pcd.voxel_down_sample(self.voxel)
