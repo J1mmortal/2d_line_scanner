@@ -15,7 +15,7 @@ from data_analysis import DataAnalysis
 
 dt = DataAnalysis()
 
-correct = "../data/damage_metrics_2.parquet"
+gt = "../data/bus4_gt.parquet"
 guess = "../data/damage_metrics.parquet"
 
-dt.compare_cluster_runs(correct, guess, 5)
+dt.compare_cluster_runs(gt, guess, 5, compact_view=True)

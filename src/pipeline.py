@@ -3,15 +3,18 @@ import logging
 import yaml
 import numpy as np
 import open3d as o3d
+
 from registration import Registration
 from damage_detection import DamageDetector
 from cloud_compare import CloudCompare
+from data_analysis import DataAnalysis
 
 log = logging.getLogger(__name__)
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-)
+# logging.basicConfig(
+#     filename="../data/run.log",
+#     level=logging.INFO,
+#     format="%(asctime)s [%(levelname)s] %(message)s",
+# )
 
 
 class Pipeline:
@@ -45,6 +48,7 @@ class Pipeline:
         self.reg = Registration(voxel_size)
         self.det = DamageDetector()
         self.ccl = CloudCompare(comp_path=source_path, ref_path=target_path)
+        self.dt = DataAnalysis()
 
         self.sor_neighbours = sor_neighbours
         self.sor_std = sor_std
@@ -69,14 +73,16 @@ class Pipeline:
 
         self.aligned_path = aligned_path
         self.tgt_path = tgt_path
+        self.gt_parquet_path = "../data/bus4_gt.parquet"
+        self.guess_parquet_path = "../data/damage_metrics.parquet"
 
         self.src = self.reg.load_pcd(source_path).transform(self.reg.tf)
         self.tgt = self.reg.load_pcd(target_path).transform(self.reg.tf)
 
         if self.select_hull:
             if not skip_reg:
-                self.src = self.det.select_bus_hull(self.src, eps=2.0, visualise=False)
-            self.tgt = self.det.select_bus_hull(self.tgt, eps=2.05, visualise=False)
+                self.src = self.det.select_bus_hull(self.src, eps=2.1, visualise=False)
+                self.tgt = self.det.select_bus_hull(self.tgt, eps=2.05, visualise=False)
 
         # self.src = self.det.crop_wheels_circular(self.src)
         # self.tgt = self.det.crop_wheels_circular(self.tgt)
@@ -128,6 +134,7 @@ class Pipeline:
             self._compute_metrics()
         else:
             self.alg_src = self.reg.load_pcd(self.aligned_path)
+            self.tgt = self.reg.load_pcd(self.tgt_path)
             self._detect()
             self._cluster()
             self._compute_metrics()
@@ -164,6 +171,7 @@ class Pipeline:
 
         if self.write:
             o3d.io.write_point_cloud(self.aligned_path, self.alg_src)
+            o3d.io.write_point_cloud(self.tgt_path, self.tgt)
 
         if self.cc:
             log.info("Running CloudCompare backend")
@@ -235,7 +243,10 @@ class Pipeline:
     def _compute_metrics(self):
         log.info("Computing damage metrics...")
         self.metrics = self.det.calculate_damage_metrics(
-            self.alg_src, self.distances, self.labels
+            self.alg_src, self.distances, self.labels, write_to_pd=self.write
+        )
+        gt_df, guess_df = self.dt.compare_cluster_runs(
+            self.gt_parquet_path, self.guess_parquet_path, 5, True
         )
 
     def _benchmark(self):
@@ -256,11 +267,11 @@ class Pipeline:
 # tgt = "../data/bus/bus_4damage.ply"
 
 
-src = "../data/bus/bus_damagev3.ply"
-tgt = "../data/bus/bus_v2.ply"
+# src = "../data/bus/bus_damagev3.ply"
+# tgt = "../data/bus/bus_v2.ply"
 
-cluster_eps = 1.5
-cluster_samples = 150
+# cluster_eps = 1.5
+# cluster_samples = 150
 
 
 # Bus

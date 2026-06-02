@@ -452,7 +452,7 @@ class Registration:
             ransac_result = self.get_initial_guess(source, target)
             if log:
                 logging.info(
-                    "Attempt %d/%d — fitness: %.4f  RMSE: %.6f",
+                    "Attempt %d/%d - fitness: %.4f  RMSE: %.6f",
                     attempt + 1,
                     ransac_retries,
                     ransac_result.fitness,

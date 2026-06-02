@@ -23,7 +23,11 @@ class DataAnalysis:
         self.reg = Registration()
 
     def compare_cluster_runs(
-        self, gt_parquet_path: str, guessed_parquet_path: str, max_distance: float
+        self,
+        gt_parquet_path: str,
+        guessed_parquet_path: str,
+        max_distance: float,
+        compact_view=False,
     ):
         # Load datasets
         df_gt = pd.read_parquet(gt_parquet_path)
@@ -53,12 +57,42 @@ class DataAnalysis:
 
         df_gt["false_negative"] = [len(matches) == 0 for matches in gt_matches]
 
+        match_len = len(df_guess["match_status"])
+        total_matches = (df_guess["match_status"] == "Success").sum()
+        total_fp = (df_guess["match_status"] == "False Positive").sum()
+        total_fn = (df_gt["false_negative"] == "True").sum()
+
         log.info(
-            f'\n{"=" * 58} Guess {"=" * 58}\n'
-            f"{df_guess}\n\n"
-            f'{"=" * 58} Ground truth {"=" * 58}\n'
-            f"{df_gt}"
+            f"Number of false positives: {total_fp}. Number of false negatives: {total_fn}"
         )
+
+        if compact_view:
+            if total_fn > 0 and total_fp > 0:
+                log.info(
+                    f'\n{"=" * 8} Guess {"=" * 8}\n'
+                    f"{df_guess[['cluster_id', 'match_status']]}\n\n"
+                    f'{"=" * 8} Ground truth {"=" * 8}\n'
+                    f"{df_gt[['cluster_id', 'false_negative']]}"
+                )
+            elif total_fn == 0 and total_fp > 0:
+                log.info(
+                    f'\n{"=" * 8} Guess {"=" * 8}\n'
+                    f"{df_guess[['cluster_id', 'match_status']]}"
+                )
+            elif total_fn > 0 and total_fp == 0:
+                log.info(
+                    f'{"=" * 8} Ground truth {"=" * 8}\n'
+                    f"{df_gt[['cluster_id', 'false_negative']]}"
+                )
+            else:
+                pass
+        else:
+            log.info(
+                f'\n{"=" * 58} Guess {"=" * 58}\n'
+                f"{df_guess}\n\n"
+                f'{"=" * 58} Ground truth {"=" * 58}\n'
+                f"{df_gt}"
+            )
 
         return df_guess, df_gt
 

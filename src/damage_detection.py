@@ -79,7 +79,7 @@ class DamageDetector:
             damaged_indices = np.where(damage_mask)[0]
             damaged_pcd = aligned_source.select_by_index(damaged_indices)
             clean_pcd, valid_inliers = damaged_pcd.remove_radius_outlier(
-                nb_points=100, radius=4
+                nb_points=600, radius=2
             )
             clean_damage_mask = np.zeros_like(damage_mask)
             clean_damage_mask[damaged_indices[valid_inliers]] = True
@@ -402,7 +402,7 @@ class DamageDetector:
         self,
         aligned_source,
         labels,
-        noise_color=(0.5, 0.5, 0.5),
+        noise_color=(0.2, 0.2, 0.2),
         cmap_name="tab20",
         downsample=0.008,
         write=False,
@@ -450,6 +450,8 @@ class DamageDetector:
         grid_res MUST be in the same physical units as your XYZ coordinates.
         """
         # 1. Isolate the target cluster
+        run_id = np.random.randint(0, 100)
+
         xyz = np.asarray(pcd.points)
 
         all_metrics = {}
@@ -545,7 +547,7 @@ class DamageDetector:
                 centroid = data["centroid"]  # Assuming shape (3,) or (2,)
 
                 row = {
-                    "run_id": "20260522_v1",  # Track runs for later comparison
+                    # "run_id": run_id,  # Track runs for later comparison
                     "cluster_id": int(cluster_id),
                     "centroid_x": float(centroid[0]),
                     "centroid_y": float(centroid[1]),
@@ -561,7 +563,7 @@ class DamageDetector:
 
             # 2. Append or write to Parquet
             df.to_parquet(
-                "../data/damage_metrics_2.parquet", engine="pyarrow", index=False
+                "../data/damage_metrics.parquet", engine="pyarrow", index=False
             )
 
         return all_metrics

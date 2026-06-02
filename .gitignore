@@ -8,6 +8,7 @@ data/block/
 data/debug/
 data/CC/
 data/las
+data/pcd/
 
 # C extensions
 *.so
