@@ -9,6 +9,7 @@ import logging
 
 from scipy.signal import savgol_filter
 from scipy.interpolate import CubicSpline, Akima1DInterpolator, PchipInterpolator
+from scipy.integrate import cumulative_trapezoid
 
 
 class Registration:
@@ -161,7 +162,7 @@ class Registration:
 
         # Set voxel size to X% of the largest dimension (e.g., 0.01 = 1%)
         self.voxel = max_dimension * ratio
-        print(f"Max dimension: {max_dimension}; Voxel size: {self.voxel}")
+        logging.info(f"Max dimension: {max_dimension}; Voxel size: {self.voxel}")
 
     def velocity_correction(
         self,
@@ -224,7 +225,7 @@ class Registration:
 
             if visualise:
                 fig, ax = plt.subplots(1, 1)
-                ax.plot(t_line_clipped, v_line)
+                ax.plot(t_line_clipped, v_line, color="red")
                 ax.scatter(sample_time, sample_speed)
                 plt.show()
         else:
@@ -251,6 +252,110 @@ class Registration:
         np.clip(PC_line_indices, 0, total_lines - 1, out=PC_line_indices)
 
         pcd_bus[:, 1] = y_line[PC_line_indices]
+
+        PC_corrected_o3d = o3d.geometry.PointCloud()
+        PC_corrected_o3d.points = o3d.utility.Vector3dVector(pcd_bus)
+        PC_corrected_o3d.paint_uniform_color([1, 0.2, 0])
+
+        return PC_corrected_o3d
+
+    def velocity_correction_cont(
+        self,
+        csv_or_df,
+        pcd,
+        method="akima",
+        denoise=False,
+        downsample_step=60,
+        visualise=True,
+    ):
+        if isinstance(csv_or_df, str):
+            df = pd.read_csv(csv_or_df)
+        else:
+            df = csv_or_df
+
+        v_time = df["Time_s"].values
+        v_speed = df["Speed_mms"].values
+
+        if denoise:
+            # Dynamically adjust window to prevent crashes on short telemetry files
+            window = min(
+                101, len(v_speed) if len(v_speed) % 2 != 0 else len(v_speed) - 1
+            )
+            if window >= 5:
+                v_speed = savgol_filter(v_speed, window_length=window, polyorder=3)
+
+        pcd_raw = np.asarray(pcd.points)
+        y_min_raw = pcd_raw[:, 1].min()
+        y_max_raw = pcd_raw[:, 1].max()
+
+        # Establish global bounds
+        t_0 = 1e-3 * y_min_raw / self.C_d
+        t_e = 1e-3 * y_max_raw / self.C_d
+
+        y_min = t_0 * self.fps * self.C_d
+        y_max = t_e * self.fps * self.C_d
+
+        pcd_y_old = pcd_raw[:, 1]
+        bus_mask = (pcd_y_old >= y_min) & (pcd_y_old <= y_max)
+        pcd_bus = pcd_raw[bus_mask].copy()
+
+        # Core Change 1: Continuous time calculation per individual point
+        t_points = t_0 + (pcd_bus[:, 1] - y_min) / (self.C_d * self.fps)
+
+        method = method.lower()
+        if method in ["cubic", "akima", "pchip"] and len(v_time) > (
+            downsample_step * 4
+        ):
+            sample_time = v_time[::downsample_step]
+            sample_speed = v_speed[::downsample_step]
+
+            if sample_time[-1] != v_time[-1]:
+                sample_time = np.append(sample_time, v_time[-1])
+                sample_speed = np.append(sample_speed, v_speed[-1])
+
+            # Protect against boundary extrapolation
+            t_points_clipped = np.clip(t_points, sample_time[0], sample_time[-1])
+            t_0_clipped = np.clip(t_0, sample_time[0], sample_time[-1])
+
+            if method == "cubic":
+                spline_func = CubicSpline(sample_time, sample_speed, bc_type="natural")
+            elif method == "akima":
+                spline_func = Akima1DInterpolator(sample_time, sample_speed)
+            elif method == "pchip":
+                spline_func = PchipInterpolator(sample_time, sample_speed)
+
+            # Core Change 2: Analytical calculus integration of the velocity spline
+            dist_func = spline_func.antiderivative()
+            pcd_bus[:, 1] = dist_func(t_points_clipped) - dist_func(t_0_clipped)
+
+            if visualise:
+                t_plot = np.linspace(t_0, t_e, 1000)
+                t_plot_clipped = np.clip(t_plot, sample_time[0], sample_time[-1])
+                fig, ax = plt.subplots(1, 1)
+                ax.plot(
+                    t_plot_clipped,
+                    spline_func(t_plot_clipped),
+                    color="red",
+                    label="Spline Profile",
+                )
+                ax.scatter(
+                    sample_time, sample_speed, color="black", s=15, label="Samples"
+                )
+                ax.set_xlabel("Time (s)")
+                ax.set_ylabel("Speed (mm/s)")
+                ax.legend()
+                plt.show()
+        else:
+            # Core Change 3: Continuous integration for linear fallback via cumulative trapezoids
+            cum_dist = cumulative_trapezoid(v_speed, v_time, initial=0)
+
+            t_points_clipped = np.clip(t_points, v_time[0], v_time[-1])
+            t_0_clipped = np.clip(t_0, v_time[0], v_time[-1])
+
+            y_continuous = np.interp(t_points_clipped, v_time, cum_dist)
+            y_t0 = np.interp(t_0_clipped, v_time, cum_dist)
+
+            pcd_bus[:, 1] = y_continuous - y_t0
 
         PC_corrected_o3d = o3d.geometry.PointCloud()
         PC_corrected_o3d.points = o3d.utility.Vector3dVector(pcd_bus)

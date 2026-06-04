@@ -21,20 +21,27 @@ if __name__ == "__main__":
 
     # np.random.seed(8)
 
-    tgt_p = r"..\data\bus\bus_v2.ply"
+    tgt_p = "../data/bus/gt/bus4.ply"
     tgt = reg.load_pcd(tgt_p)
-    # tgt = reg.downsample(tgt, ratio=0.001)
     tgt.paint_uniform_color([0, 0, 1])
 
-    src_p = r"..\data\bus\snelheid_test2.ply"
+    src_p = r"..\data\bus\snelheid_test_bus4.ply"
     src = reg.load_pcd(src_p)
     # src = reg.downsample(src, ratio=0.001)
 
     # csv_p = r"..\data\speed_test_values.csv"
-    csv_p = r"..\data\bus_kinematics.csv"
+    csv_p = r"..\data\bus\speed_files\speed_bus4.csv"
+
+    delay = 0
+    df = pd.read_csv(csv_p)
+    df_delayed = df.copy()
+
+    df_delayed["Time_s"] += delay
 
     # PC_corrected = PC_velocity_correction(v_noisy, T_0, T_e, FPS, C_d, src_raw)
-    PC_corrected = reg.velocity_correction(csv_p, src)
+    PC_corrected = reg.velocity_correction_cont(
+        df_delayed, src, downsample_step=20, visualise=True
+    )
     # print(f"Original point-cloud shape: {src_raw.shape}")
     # print(f"Corrected point_cloud shape: {PC_corrected.scale}")
 

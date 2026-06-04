@@ -94,7 +94,7 @@ src = reg.load_pcd(src_p)
 
 # reg.benchmark(src, tgt)
 
-csv_path = "../data/bus_kinematics.csv"
+csv_path = r"..\data\bus\speed_files\speed_bus4.csv"
 # csv_path = "../data/velocity_profile_halfsin.csv"
 
 df = pd.read_csv(csv_path)
@@ -119,9 +119,9 @@ noisy_speed = df_noisy["Speed_mms"].values
 noisy_speed = savgol_filter(noisy_speed, window_length=101, polyorder=3)
 
 
-sample_speed = speed[::100]
-sample_time = time[::100]
-noisy_sample_speed = noisy_speed[::100]
+sample_speed = speed[::50]
+sample_time = time[::50]
+noisy_sample_speed = noisy_speed[::50]
 
 
 spline = CubicSpline(sample_time, sample_speed, bc_type="natural")
@@ -158,7 +158,7 @@ ax[1, 1].plot(time, y_a_noisy)
 ax[1, 1].scatter(sample_time, noisy_sample_speed)
 ax[1, 2].plot(time, y_p_noisy)
 ax[1, 2].scatter(sample_time, noisy_sample_speed)
-# plt.show()
+plt.show()
 
 # script_start = time.perf_counter()
 

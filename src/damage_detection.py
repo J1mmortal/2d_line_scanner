@@ -5,6 +5,7 @@ import copy
 import warnings
 import logging
 from sklearn.neighbors import KDTree
+from sklearn.mixture import GaussianMixture
 import pandas as pd
 
 from scipy.spatial import ConvexHull, cKDTree
@@ -42,14 +43,13 @@ class DamageDetector:
         sigma_thresh=3,
         percentile=80,
         bidirectional=True,
-        remove_outliers=False,
+        outliers_points=None,
+        radius=2,
     ):
         pcd_dist = aligned_source.compute_point_cloud_distance(target)
         src_distances = np.asarray(pcd_dist)
 
-        mean, std, threshold = self.estimate_noise(
-            src_distances, percentile, sigma_thresh
-        )
+        mean, std, threshold = self.estimate_noise_mad(src_distances, sigma_thresh)
         damage_mask = src_distances > threshold
 
         if bidirectional and damage_mask.sum() > 0:
@@ -64,8 +64,8 @@ class DamageDetector:
             _, nn_idx = tree.query(src_pts, k=1)
             reverse_dists = tgt_distances[nn_idx]
 
-            mean_r, std_r, threshold_r = self.estimate_noise(
-                tgt_distances, percentile, sigma_thresh
+            mean_r, std_r, threshold_r = self.estimate_noise_mad(
+                src_distances, sigma_thresh
             )
 
             # Only keep damage that is anomalous in BOTH directions
@@ -75,12 +75,17 @@ class DamageDetector:
             bidirectional_mask[np.where(damage_mask)[0][confirmed]] = True
             damage_mask = bidirectional_mask
 
-        if remove_outliers and damage_mask.sum() > 0:
+        if outliers_points is not None and damage_mask.sum() > 0:
             damaged_indices = np.where(damage_mask)[0]
             damaged_pcd = aligned_source.select_by_index(damaged_indices)
             clean_pcd, valid_inliers = damaged_pcd.remove_radius_outlier(
-                nb_points=600, radius=2
+                nb_points=outliers_points, radius=radius
             )
+
+            logging.info(
+                f"Removed {len(damaged_pcd.points) - len(valid_inliers)} points from damage mask using Radius Outlier Removal with nb_points = {outliers_points} and radius = {radius}"
+            )
+
             clean_damage_mask = np.zeros_like(damage_mask)
             clean_damage_mask[damaged_indices[valid_inliers]] = True
             damage_mask = clean_damage_mask
@@ -88,7 +93,7 @@ class DamageDetector:
         return damage_mask, src_distances, threshold
 
     def cluster(
-        self, aligned_source, damage_mask, eps=2.0, min_samples=10
+        self, aligned_source, damage_mask, eps=2.0, min_samples=10, verbose=True
     ):  # EPS parameter is very important, must be chosen to match data magnitude and point density
         xyz = np.asarray(aligned_source.points)
         xyz_damage = xyz[damage_mask]
@@ -115,7 +120,7 @@ class DamageDetector:
 
         labels = np.asarray(
             damage_pcd.cluster_dbscan(
-                eps=eps, min_points=min_samples, print_progress=True
+                eps=eps, min_points=min_samples, print_progress=verbose
             )
         )
 
@@ -149,7 +154,7 @@ class DamageDetector:
         # print_progress=True will prove if the algorithm is actually hanging
         labels_down = np.asarray(
             down_pcd.cluster_dbscan(
-                eps=eps, min_points=min_samples, print_progress=True
+                eps=eps, min_points=min_samples, print_progress=False
             )
         )
 
@@ -173,6 +178,49 @@ class DamageDetector:
         noise_std = float(bulk_dists.std())
 
         threshold = noise_mean + sigma_thresh * noise_std
+
+        return noise_mean, noise_std, threshold
+
+    import numpy as np
+
+    def estimate_noise_mad(self, distances, sigma_thresh=3.0):
+        """
+        Robust noise estimation using Median Absolute Deviation (MAD).
+        Assumes the majority of points (>50%) represent the true surface overlap.
+        """
+        # Median is highly resistant to long-tail structural outliers
+        noise_median = np.median(distances)
+
+        # Calculate MAD
+        mad = np.median(np.abs(distances - noise_median))
+
+        # 1.4826 scales MAD to equal the standard deviation of a normal distribution
+        noise_std = 1.4826 * mad
+
+        # Define threshold based on robust metrics
+        threshold = noise_median + sigma_thresh * noise_std
+
+        return float(noise_median), float(noise_std), float(threshold)
+
+    def estimate_noise_gmm(self, distances):
+        """
+        Statistically separates noise from structural changes using a 2-Component GMM.
+        """
+        # Reshape for scikit-learn API
+        d_reshaped = distances.reshape(-1, 1)
+
+        # Fit two Gaussians: one for the noise floor, one for outliers/structural features
+        gmm = GaussianMixture(n_components=2, random_state=8)
+        gmm.fit(d_reshaped)
+
+        # Identify the noise component (the one with the smaller mean distance)
+        noise_idx = np.argmin(gmm.means_)
+
+        noise_mean = float(gmm.means_[noise_idx][0])
+        noise_std = float(np.sqrt(gmm.covariances_[noise_idx][0][0]))
+
+        # Statistical 3-sigma cutoff for the noise component
+        threshold = noise_mean + 3.0 * noise_std
 
         return noise_mean, noise_std, threshold
 
@@ -406,6 +454,7 @@ class DamageDetector:
         cmap_name="tab20",
         downsample=0.008,
         write=False,
+        vis=True,
     ):
         xyz = np.asarray(aligned_source.points)
         labels = np.asarray(labels)
@@ -434,16 +483,19 @@ class DamageDetector:
                 pcd,
             )
 
-        o3d.visualization.draw_geometries(
-            [self.downsample(pcd, voxel_ratio=downsample)],
-            window_name=f"Damage clustered into {len(set(labels))-1} regions",
-            width=1600,
-            height=1000,
-        )
+        if vis:
+            o3d.visualization.draw_geometries(
+                [self.downsample(pcd, voxel_ratio=downsample)],
+                window_name=f"Damage clustered into {len(set(labels))-1} regions",
+                width=1600,
+                height=1000,
+            )
+
+        return self.downsample(pcd, voxel_ratio=downsample)
 
     # Need to correctly pass the damage plane as coming from the scanner
     def calculate_damage_metrics(
-        self, pcd, distances, labels, cmap_name="tab20", write_to_pd=False
+        self, pcd, distances, labels, cmap_name="tab20", write_to_pd=False, verbose=True
     ):
         """
         Calculates 2.5D metrics for a specific damage cluster.
@@ -517,29 +569,30 @@ class DamageDetector:
                 "color_rgb": rgb,
             }
 
-        print(
-            "\n============================== Damage cluster metrics ================================="
-        )
-        header = f"{'Cluster ID':<12}{'Location':<35}{'Area':<14}{'Volume':<14}{'Perimeter':<14}{'Max Depth':<14}{'Color (R, G, B)':<20}"
-        print(header)
-        print("-" * len(header))
-
-        for cluster_id, data in sorted(all_metrics.items()):
-            centroid = np.array2string(
-                data["centroid"], precision=3, separator=", ", floatmode="fixed"
-            )
-            area = f"{data['projected_area']:.6f}"
-            volume = f"{data['volume']:.6f}"
-            perimeter = f"{data['perimeter']:.6f}"
-            depth = f"{data['max_depth']:.6f}"
-
-            colour = data["color"]
-            r, g, b = data["color_rgb"]
-            color_str = f"{colour} ({r:.2f}, {g:.2f}, {b:.2f})"
-
+        if verbose:
             print(
-                f"{cluster_id:<12}{centroid:<35}{area:<14}{volume:<14}{perimeter:<14}{depth:<14}{color_str:<20}"
+                "\n=========================== Damage cluster metrics =============================="
             )
+            header = f"{'Cluster ID':<12}{'Location':<35}{'Area':<14}{'Volume':<14}{'Perimeter':<14}{'Max Depth':<14}{'Color (R, G, B)':<20}"
+            print(header)
+            print("-" * len(header))
+
+            for cluster_id, data in sorted(all_metrics.items()):
+                centroid = np.array2string(
+                    data["centroid"], precision=3, separator=", ", floatmode="fixed"
+                )
+                area = f"{data['projected_area']:.6f}"
+                volume = f"{data['volume']:.6f}"
+                perimeter = f"{data['perimeter']:.6f}"
+                depth = f"{data['max_depth']:.6f}"
+
+                colour = data["color"]
+                r, g, b = data["color_rgb"]
+                color_str = f"{colour} ({r:.2f}, {g:.2f}, {b:.2f})"
+
+                print(
+                    f"{cluster_id:<12}{centroid:<35}{area:<14}{volume:<14}{perimeter:<14}{depth:<14}{color_str:<20}"
+                )
 
         if write_to_pd:
             rows = []
@@ -567,6 +620,89 @@ class DamageDetector:
             )
 
         return all_metrics
+
+    def compare_cluster_runs(
+        self,
+        gt_parquet_path: str,
+        guessed_parquet_path: str,
+        max_distance: float,
+        compact_view=False,
+        verbose=False,
+    ):
+        # Load datasets
+        df_gt = pd.read_parquet(gt_parquet_path)
+        df_guess = pd.read_parquet(guessed_parquet_path)
+
+        coord_cols = ["centroid_x", "centroid_y", "centroid_z"]
+
+        # Extract coordinate matrices
+        gt_coords = df_gt[coord_cols].to_numpy()
+        guess_coords = df_guess[coord_cols].to_numpy()
+
+        # Build spatial index trees
+        gt_tree = cKDTree(gt_coords)
+        guess_tree = cKDTree(guess_coords)
+
+        # 1. Evaluate Guesses: Find all GT indices within max_distance for each Guess
+        # query_ball_point returns a list of indices for each row
+        guess_matches = gt_tree.query_ball_point(guess_coords, r=max_distance)
+
+        df_guess["match_status"] = [
+            "Success" if len(matches) > 0 else "False Positive"
+            for matches in guess_matches
+        ]
+
+        # 2. Evaluate Ground Truth: Find all Guess indices within max_distance for each GT
+        gt_matches = guess_tree.query_ball_point(gt_coords, r=max_distance)
+
+        df_gt["false_negative"] = [len(matches) == 0 for matches in gt_matches]
+
+        match_len = len(df_guess["match_status"])
+        total_matches = (df_guess["match_status"] == "Success").sum()
+        total_fp = (df_guess["match_status"] == "False Positive").sum()
+        total_fn = (df_gt["false_negative"] == True).sum()
+
+        if verbose:
+            logging.info(
+                f"Number of False Positives: {total_fp}. Number of False Negatives: {total_fn}"
+            )
+
+            if compact_view:
+                if total_fn > 0 and total_fp > 0:
+                    df_guess_fp = df_guess.loc[
+                        df_guess["match_status"] == "False Positive"
+                    ].reset_index(drop=True)
+
+                    df_gt_fn = df_gt.loc[df_gt["false_negative"] == True].reset_index(
+                        drop=True
+                    )
+
+                    logging.info(
+                        f"Guess\n{df_guess_fp}\n"
+                        f'\n{"=" * 50} Ground truth {"=" * 50}\n{df_gt_fn}'
+                    )
+
+                elif total_fn == 0 and total_fp > 0:
+                    df_guess_fp = df_guess.loc[
+                        df_guess["match_status"] == "False Positive"
+                    ]
+                    logging.info(f"Guess \n{df_guess_fp}")
+
+                elif total_fn > 0 and total_fp == 0:
+                    df_gt_fn = df_gt.loc[df_gt["false_negative"] == True]
+                    logging.info(f"Ground truth\n{df_gt_fn}")
+
+                else:
+                    pass
+            else:
+                logging.info(
+                    f'\n{"=" * 58} Guess {"=" * 58}\n'
+                    f"{df_guess}\n\n"
+                    f'{"=" * 58} Ground truth {"=" * 58}\n'
+                    f"{df_gt}"
+                )
+
+        return total_fp, total_fn
 
     def _get_closest_color_name(self, rgb):
         """Finds the closest human-readable color name for an RGB tuple."""

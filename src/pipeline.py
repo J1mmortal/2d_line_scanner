@@ -7,7 +7,6 @@ import open3d as o3d
 from registration import Registration
 from damage_detection import DamageDetector
 from cloud_compare import CloudCompare
-from data_analysis import DataAnalysis
 
 log = logging.getLogger(__name__)
 # logging.basicConfig(
@@ -22,15 +21,20 @@ class Pipeline:
         self,
         source_path: str,
         target_path: str,
-        plane_fit_dist_th: float = None,
-        select_hull: bool = False,
+        src_pcd=None,
+        tgt_pcd=None,
+        select_hull: bool = True,
+        velocity_scale: bool = False,
+        speed_data=None,
         sor_neighbours: int = None,
         sor_std: float = 1.0,
-        voxel_size: float = 2.0,
+        voxel_size: float = 5.0,
+        downsample_reg: bool = False,
         sigma_thresh: float = 3.0,
         percentile: float = 80.0,
-        median_filter_kernel=None,
         crop: bool = True,
+        damage_outliers=None,
+        damage_radius=2,
         cluster_eps: float = 2.0,
         cluster_min_samples: int = 10,
         fast_cluster: bool = False,
@@ -48,17 +52,20 @@ class Pipeline:
         self.reg = Registration(voxel_size)
         self.det = DamageDetector()
         self.ccl = CloudCompare(comp_path=source_path, ref_path=target_path)
-        self.dt = DataAnalysis()
 
         self.sor_neighbours = sor_neighbours
         self.sor_std = sor_std
-        self.plane_fit_dist_th = plane_fit_dist_th
         self.select_hull = select_hull
+        self.velocity_scale = velocity_scale
+
+        self.downsample_reg = downsample_reg
 
         self.sigma_thresh = sigma_thresh
         self.percentile = percentile
-        self.median_filter_kernel = median_filter_kernel
         self.crop = crop
+        self.damage_outliers = damage_outliers
+        self.damage_radius = damage_radius
+
         self.cluster_eps = cluster_eps
         self.cluster_min_samples = cluster_min_samples
         self.fast_cluster = fast_cluster
@@ -76,31 +83,30 @@ class Pipeline:
         self.gt_parquet_path = "../data/bus4_gt.parquet"
         self.guess_parquet_path = "../data/damage_metrics.parquet"
 
-        self.src = self.reg.load_pcd(source_path).transform(self.reg.tf)
-        self.tgt = self.reg.load_pcd(target_path).transform(self.reg.tf)
+        self.src = src_pcd if src_pcd is not None else self.reg.load_pcd(source_path)
+        self.tgt = tgt_pcd if tgt_pcd is not None else self.reg.load_pcd(target_path)
+
+        self.tgt = self.tgt.transform(self.reg.tf)
+
+        if self.velocity_scale:
+            if speed_data is None:
+                self.src = self.reg.velocity_correction_cont(
+                    "../data/bus/speed_files/speed_bus4.csv",
+                    self.src,
+                    downsample_step=20,
+                    visualise=False,
+                )
+            else:
+                self.src = self.reg.velocity_correction(
+                    speed_data, self.src, visualise=False
+                )
+
+        self.src = self.src.transform(self.reg.tf)
 
         if self.select_hull:
             if not skip_reg:
                 self.src = self.det.select_bus_hull(self.src, eps=2.1, visualise=False)
                 self.tgt = self.det.select_bus_hull(self.tgt, eps=2.05, visualise=False)
-
-        # self.src = self.det.crop_wheels_circular(self.src)
-        # self.tgt = self.det.crop_wheels_circular(self.tgt)
-
-        # self.src = self.reg.crop_pcd(self.src, 55, 40)
-        # self.tgt = self.reg.crop_pcd(self.tgt, 55, 40)
-
-        if self.plane_fit_dist_th is not None:
-            log.info("Segmenting plane...")
-            self.src, removed = self.det.extract_dominant_plane(
-                self.src, distance_threshold=plane_fit_dist_th
-            )
-            self.tgt, _ = self.det.extract_dominant_plane(
-                self.tgt, distance_threshold=plane_fit_dist_th
-            )
-            log.info(
-                f"Performed plane segmentation using RANSAC, removed {removed} points"
-            )
 
         if self.sor_neighbours is not None:
             log.info("Removing statistical outliers...")
@@ -112,12 +118,18 @@ class Pipeline:
 
         # Results populated by run()
         self.alg_src = None
+        self.tgt_reg = None
+        self.src_reg = None
         self.cropped_pcd = None
         self.transformation = None
         self.mask = None
         self.distances = None
         self.labels = None
         self.metrics = None
+        self.rmse = None
+        self.fitness = None
+        self.fp = None
+        self.fn = None
 
     def run(self):
         # self.reg.set_voxel(self.tgt)
@@ -142,17 +154,40 @@ class Pipeline:
 
     def _register(self):
         log.info("Starting registration...")
-        icp, _, eval = self.reg.register(self.src, self.tgt)
-        log.info("ICP fitness: %.4f  RMSE: %.6f", eval.fitness, eval.inlier_rmse)
 
-        if eval.fitness < self.min_fitness:
-            raise RuntimeError(
-                f"Registration fitness {eval.fitness:.3f} is below threshold "
-                f"{self.min_fitness}. Check inputs or voxel size."
-            )
+        if self.downsample_reg:
+            self.tgt_reg = self.tgt.uniform_down_sample(15)
+            self.reg.set_voxel(self.tgt_reg, ratio=0.03)
 
-        self.transformation = icp.transformation
-        self.alg_src = copy.deepcopy(self.src).transform(self.transformation)
+            self.src_reg = self.src.uniform_down_sample(15)
+
+            icp, _, _ = self.reg.register(self.src_reg, self.tgt_reg, ransac_retries=5)
+
+            eval = self.reg.evaluate_alignment(self.src, self.tgt, icp.transformation)
+
+            log.info("ICP fitness: %.4f  RMSE: %.6f", eval.fitness, eval.inlier_rmse)
+
+            self.rmse = eval.inlier_rmse
+            self.fitness = eval.fitness
+
+            self.transformation = icp.transformation
+            self.alg_src = copy.deepcopy(self.src).transform(self.transformation)
+        else:
+            icp, _, eval = self.reg.register(self.src, self.tgt)
+
+            self.rmse = eval.inlier_rmse
+            self.fitness = eval.fitness
+
+            log.info("ICP fitness: %.4f  RMSE: %.6f", eval.fitness, eval.inlier_rmse)
+
+            if eval.fitness < self.min_fitness:
+                raise RuntimeError(
+                    f"Registration fitness {eval.fitness:.3f} is below threshold "
+                    f"{self.min_fitness}. Check inputs or voxel size."
+                )
+
+            self.transformation = icp.transformation
+            self.alg_src = copy.deepcopy(self.src).transform(self.transformation)
 
         if self.visualise:
             self.reg.visualise_result(
@@ -197,7 +232,8 @@ class Pipeline:
                 sigma_thresh=self.sigma_thresh,
                 percentile=self.percentile,
                 bidirectional=True,  # new gate
-                remove_outliers=True,
+                outliers_points=self.damage_outliers,
+                radius=self.damage_radius,
             )
 
         log.info("Damage classified above a threshold of %f", threshold)
@@ -223,6 +259,7 @@ class Pipeline:
                 self.mask,
                 eps=self.cluster_eps,
                 min_samples=self.cluster_min_samples,
+                verbose=False,
             )
         else:
             self.labels = self.det.cluster_fast(
@@ -235,19 +272,19 @@ class Pipeline:
         n_clusters = len(set(self.labels[self.labels >= 0]))
         log.info("Found %d damage cluster(s)", n_clusters)
 
+    def _compute_metrics(self):
+        log.info("Computing damage metrics...")
+        self.metrics = self.det.calculate_damage_metrics(
+            self.alg_src, self.distances, self.labels, write_to_pd=True, verbose=False
+        )
+        self.fp, self.fn = self.det.compare_cluster_runs(
+            self.gt_parquet_path, self.guess_parquet_path, 5, True, True
+        )
+
         if self.visualise:
             self.det.color_point_cloud_by_labels(
                 self.alg_src, self.labels, downsample=0.001, write=self.write
             )
-
-    def _compute_metrics(self):
-        log.info("Computing damage metrics...")
-        self.metrics = self.det.calculate_damage_metrics(
-            self.alg_src, self.distances, self.labels, write_to_pd=self.write
-        )
-        gt_df, guess_df = self.dt.compare_cluster_runs(
-            self.gt_parquet_path, self.guess_parquet_path, 5, True
-        )
 
     def _benchmark(self):
         log.info("Benchmarking registration methods")
