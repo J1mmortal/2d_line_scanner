@@ -369,8 +369,8 @@ class DataAnalysis:
         plt.figure(figsize=(10, 8))
         sns.heatmap(
             rmse_grid,
-            xticklabels=[f"{m:.1f}" for m in means_range],
-            yticklabels=[f"{s:.1f}" for s in stds_range],
+            xticklabels=[f"{m:.2g}" for m in means_range],
+            yticklabels=[f"{s:.2g}" for s in stds_range],
             cmap="viridis",
             annot=True,
             fmt=".3f",
@@ -387,8 +387,8 @@ class DataAnalysis:
         plt.figure(figsize=(10, 8))
         sns.heatmap(
             fitness_grid,
-            xticklabels=[f"{m:.1f}" for m in means_range],
-            yticklabels=[f"{s:.1f}" for s in stds_range],
+            xticklabels=[f"{m:.2g}" for m in means_range],
+            yticklabels=[f"{s:.2g}" for s in stds_range],
             cmap="viridis",
             annot=True,
             fmt=".3f",
@@ -405,8 +405,8 @@ class DataAnalysis:
         plt.figure(figsize=(10, 8))
         sns.heatmap(
             fp_grid,
-            xticklabels=[f"{m:.1f}" for m in means_range],
-            yticklabels=[f"{s:.1f}" for s in stds_range],
+            xticklabels=[f"{m:.2g}" for m in means_range],
+            yticklabels=[f"{s:.2g}" for s in stds_range],
             cmap="viridis",
             annot=True,
             fmt=".3f",
@@ -423,8 +423,8 @@ class DataAnalysis:
         plt.figure(figsize=(10, 8))
         sns.heatmap(
             fn_grid,
-            xticklabels=[f"{m:.1f}" for m in means_range],
-            yticklabels=[f"{s:.1f}" for s in stds_range],
+            xticklabels=[f"{m:.2g}" for m in means_range],
+            yticklabels=[f"{s:.2g}" for s in stds_range],
             cmap="viridis",
             annot=True,
             fmt=".3f",

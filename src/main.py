@@ -27,6 +27,7 @@ from pipeline import Pipeline
 # tgt_test = "../data/bus/gt/bus4.ply"
 
 tgt_test = "../data/bus/gt/bus4.ply"
+# tgt_test = "../data/CC/alg_source_CC.ply"
 # src_test = "../data/bus/lighting/bus4_lightson.ply"
 
 src_test = "../data/bus/snelheid_test_bus4.ply"
