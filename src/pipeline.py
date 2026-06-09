@@ -89,10 +89,12 @@ class Pipeline:
         self.tgt = self.tgt.transform(self.reg.tf)
 
         if self.velocity_scale:
+            log.info("Scaling bus point cloud based on velocity...")
             if speed_data is None:
                 self.src = self.reg.velocity_correction_cont(
                     "../data/bus/speed_files/speed_bus4.csv",
                     self.src,
+                    denoise=False,
                     downsample_step=20,
                     visualise=False,
                 )
@@ -105,6 +107,7 @@ class Pipeline:
 
         if self.select_hull:
             if not skip_reg:
+                log.info("Segmenting bus hull...")
                 self.src = self.det.select_bus_hull(self.src, eps=2.1, visualise=False)
                 self.tgt = self.det.select_bus_hull(self.tgt, eps=2.05, visualise=False)
 
@@ -130,6 +133,7 @@ class Pipeline:
         self.fitness = None
         self.fp = None
         self.fn = None
+        self.n_clusters = None
 
     def run(self):
         # self.reg.set_voxel(self.tgt)
@@ -239,7 +243,7 @@ class Pipeline:
         log.info("Damage classified above a threshold of %f", threshold)
 
         if self.crop:
-            self.mask = self.det.crop_damage(self.alg_src, self.mask, 55, 30)
+            self.mask = self.det.crop_damage(self.alg_src, self.mask, 55, 10)
 
         log.info("Damage points: %d / %d", self.mask.sum(), len(self.mask))
 
@@ -269,8 +273,8 @@ class Pipeline:
                 eps=self.cluster_eps,
                 min_samples=self.cluster_min_samples,
             )
-        n_clusters = len(set(self.labels[self.labels >= 0]))
-        log.info("Found %d damage cluster(s)", n_clusters)
+        self.n_clusters = len(set(self.labels[self.labels >= 0]))
+        log.info("Found %d damage cluster(s)", self.n_clusters)
 
     def _compute_metrics(self):
         log.info("Computing damage metrics...")

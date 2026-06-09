@@ -27,10 +27,17 @@ from pipeline import Pipeline
 # tgt_test = "../data/bus/gt/bus4.ply"
 
 tgt_test = "../data/bus/gt/bus4.ply"
-# tgt_test = "../data/CC/alg_source_CC.ply"
+# tgt_test = "../data/bus/scaled_speed_bus4.ply"
 # src_test = "../data/bus/lighting/bus4_lightson.ply"
 
 src_test = "../data/bus/snelheid_test_bus4.ply"
+
+# src_sun = r"..\data\bus\lighting\bus4_sun.ply"
+# src_light = r"..\data\bus\lighting\bus4_lightson.ply"
+# src_dark = r"..\data\bus\lighting\bus4_lightsoff.ply"
+
+# tgt_sun = r"..\data\bus\lighting\bus3_sun.ply"
+# tgt_dark = r"..\data\bus\lighting\bus3_lightsoff.ply"
 
 # Initial plane / hull fitting / cropping
 select_hull = True

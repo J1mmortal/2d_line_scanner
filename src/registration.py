@@ -331,6 +331,12 @@ class Registration:
             if visualise:
                 t_plot = np.linspace(t_0, t_e, 1000)
                 t_plot_clipped = np.clip(t_plot, sample_time[0], sample_time[-1])
+
+                t_start_node = t_plot_clipped[0]
+                t_end_node = t_plot_clipped[-1]
+                y_start_node = float(spline_func(t_start_node))
+                y_end_node = float(spline_func(t_end_node))
+
                 fig, ax = plt.subplots(1, 1)
                 ax.plot(
                     t_plot_clipped,
@@ -341,9 +347,38 @@ class Registration:
                 ax.scatter(
                     sample_time, sample_speed, color="black", s=15, label="Samples"
                 )
+                # ax.scatter(
+                #     [t_start_node, t_end_node],
+                #     [y_start_node, y_end_node],
+                #     color="blue",
+                #     s=40,
+                #     marker="o",
+                #     zorder=5,
+                #     label="Time Bounds",
+                # )
+                ax.annotate(
+                    "$T_0$",
+                    xy=(t_start_node, y_start_node),
+                    xytext=(-20, 20),
+                    textcoords="offset points",
+                    arrowprops=dict(arrowstyle="->", color="blue", lw=0.8),
+                    fontsize=16,
+                    fontweight="bold",
+                )
+
+                ax.annotate(
+                    "$T_e$",
+                    xy=(t_end_node, y_end_node),
+                    xytext=(20, 20),
+                    textcoords="offset points",
+                    arrowprops=dict(arrowstyle="->", color="blue", lw=0.8),
+                    fontsize=16,
+                    fontweight="bold",
+                )
                 ax.set_xlabel("Time (s)")
                 ax.set_ylabel("Speed (mm/s)")
                 ax.legend()
+                plt.title("Raw and interpolated bus velocity profile")
                 plt.show()
         else:
             # Core Change 3: Continuous integration for linear fallback via cumulative trapezoids

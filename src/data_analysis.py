@@ -6,13 +6,15 @@ import pandas as pd
 import seaborn as sns
 from tqdm import tqdm
 import logging
+import os
+
+from scipy.spatial import cKDTree
+from scipy.interpolate import CubicSpline, Akima1DInterpolator, PchipInterpolator
+from matplotlib.ticker import MaxNLocator
 
 from registration import Registration
 from damage_detection import DamageDetector
 from pipeline import Pipeline
-
-from scipy.spatial import cKDTree
-from scipy.interpolate import CubicSpline, Akima1DInterpolator, PchipInterpolator
 
 plt.style.use("science")
 # plt.style.use(["science", "ieee"])
@@ -295,23 +297,20 @@ class DataAnalysis:
         mc_iterations=10,
         uniform_downsample=False,
         detect=True,
+        output_dir="../data/sweep_results",
     ):
-        """
-        Sweeps a 2D grid of noise mean (bias) and std dev (jitter).
-        Generates a heatmap of the resulting mean RMSE.
-        """
-        # Initialize grid matrix
+        """Computes grid sweep and writes data to disk. No plotting occurs here."""
+        os.makedirs(output_dir, exist_ok=True)
+        # pc_dir = os.path.join(output_dir, "point_clouds")
+        # os.makedirs(pc_dir, exist_ok=True)
+
         rmse_grid = np.zeros((len(stds_range), len(means_range)))
         fitness_grid = np.zeros((len(stds_range), len(means_range)))
         fp_grid = np.zeros((len(stds_range), len(means_range)))
         fn_grid = np.zeros((len(stds_range), len(means_range)))
-        src_grid = np.empty((len(stds_range), len(means_range)), dtype=object)
-        tgt_grid = np.empty((len(stds_range), len(means_range)), dtype=object)
-        clst_grid = np.empty((len(stds_range), len(means_range)), dtype=object)
 
         df_base = pd.read_csv(csv_path)
 
-        # Iterate through the grid
         for s_idx, sigma in enumerate(tqdm(stds_range, desc="Sigma sweep", position=0)):
             for m_idx, mean in enumerate(
                 tqdm(means_range, desc="Mean sweep", position=1, leave=False)
@@ -320,10 +319,10 @@ class DataAnalysis:
 
                 for _ in range(mc_iterations):
                     df_noisy = df_base.copy()
+                    noise = np.random.normal(loc=mean, scale=sigma, size=len(df_noisy))
                     log.info(
                         f"Adding noise with mean {mean} and standard deviation {sigma}"
                     )
-                    noise = np.random.normal(loc=mean, scale=sigma, size=len(df_noisy))
                     df_noisy["Speed_mms"] += noise
 
                     try:
@@ -333,10 +332,8 @@ class DataAnalysis:
                             speed_data=df_noisy,
                             **self.pipe_params,
                         )
-
                         metrics = pip.run()
 
-                        # Extract metrics populated inside the pipeline instance
                         iter_fitness.append(pip.fitness)
                         iter_rmse.append(pip.rmse)
                         iter_fp.append(pip.fp)
@@ -346,7 +343,6 @@ class DataAnalysis:
                         log.warning(f"Iteration failed: {e}")
                         continue
 
-                # Store average performance for this specific noise profile
                 rmse_grid[s_idx, m_idx] = np.mean(iter_rmse) if iter_rmse else np.nan
                 fitness_grid[s_idx, m_idx] = (
                     np.mean(iter_fitness) if iter_fitness else np.nan
@@ -354,91 +350,129 @@ class DataAnalysis:
                 fp_grid[s_idx, m_idx] = np.mean(iter_fp) if iter_fp else np.nan
                 fn_grid[s_idx, m_idx] = np.mean(iter_fn) if iter_fn else np.nan
 
-                # pip.tgt.paint_uniform_color([0.0, 0.0, 1.0])
-
-                # src_grid[s_idx, m_idx] = self.reg.downsample(pip.alg_src, ratio=0.002)
-                # tgt_grid[s_idx, m_idx] = self.reg.downsample(pip.tgt, ratio=0.002)
-
-                cluster_cloud = self.det.color_point_cloud_by_labels(
-                    pip.alg_src, pip.labels, downsample=0.001, write=False, vis=False
-                )
-
-                clst_grid[s_idx, m_idx] = cluster_cloud
-
-        # Plotting the 2D Heatmap
-        plt.figure(figsize=(10, 8))
-        sns.heatmap(
-            rmse_grid,
-            xticklabels=[f"{m:.2g}" for m in means_range],
-            yticklabels=[f"{s:.2g}" for s in stds_range],
-            cmap="viridis",
-            annot=True,
-            fmt=".3f",
-            cbar_kws={"label": "Mean Registration RMSE (mm)"},
+        # Save all scalar grids and sweep ranges into a compressed file
+        archive_path = os.path.join(output_dir, "sweep_metrics_denoise.npz")
+        np.savez_compressed(
+            archive_path,
+            rmse_grid=rmse_grid,
+            fitness_grid=fitness_grid,
+            fp_grid=fp_grid,
+            fn_grid=fn_grid,
+            means_range=means_range,
+            stds_range=stds_range,
         )
-        plt.title(
-            "RMSE Sensitivity Matrix: Velocity Bias ($\mu$) vs. Jitter ($\sigma$)"
-        )
-        plt.xlabel("Velocity Noise Mean / Bias ($\mu$ in mm/s)")
-        plt.ylabel("Velocity Noise Std Dev / Jitter ($\sigma$ in mm/s)")
-        plt.gca().invert_yaxis()  # Low noise at bottom, high noise at top
-        plt.show()
+        print(f"Sweep numerical matrices saved successfully to {archive_path}")
+        return archive_path
 
-        plt.figure(figsize=(10, 8))
-        sns.heatmap(
-            fitness_grid,
-            xticklabels=[f"{m:.2g}" for m in means_range],
-            yticklabels=[f"{s:.2g}" for s in stds_range],
-            cmap="viridis",
-            annot=True,
-            fmt=".3f",
-            cbar_kws={"label": "Mean Registration RMSE (mm)"},
-        )
-        plt.title(
-            "Fitness Sensitivity Matrix: Velocity Bias ($\mu$) vs. Jitter ($\sigma$)"
-        )
-        plt.xlabel("Velocity Noise Mean / Bias ($\mu$ in mm/s)")
-        plt.ylabel("Velocity Noise Std Dev / Jitter ($\sigma$ in mm/s)")
-        plt.gca().invert_yaxis()  # Low noise at bottom, high noise at top
-        plt.show()
+    def plot_saved_sweep_results(
+        self, archive_path, figs_output_dir="../data/figs/latest"
+    ):
+        """Loads metrics from disk and outputs publication-ready IEEE two-column plots."""
+        os.makedirs(figs_output_dir, exist_ok=True)
+        plt.style.use(["science", "ieee"])
 
-        plt.figure(figsize=(10, 8))
-        sns.heatmap(
-            fp_grid,
-            xticklabels=[f"{m:.2g}" for m in means_range],
-            yticklabels=[f"{s:.2g}" for s in stds_range],
-            cmap="viridis",
-            annot=True,
-            fmt=".3f",
-            cbar_kws={"label": "Number of False positives"},
-        )
-        plt.title(
-            "False Positive Sensitivity Matrix: Velocity Bias ($\mu$) vs. Jitter ($\sigma$)"
-        )
-        plt.xlabel("Velocity Noise Mean / Bias ($\mu$ in mm/s)")
-        plt.ylabel("Velocity Noise Std Dev / Jitter ($\sigma$ in mm/s)")
-        plt.gca().invert_yaxis()  # Low noise at bottom, high noise at top
-        plt.show()
+        # --- IEEE single-column layout constants ---
+        IEEE_COL_W = 3.5  # inches — hard constraint for single-column figures
+        FONT_LABEL = 7  # axis label pt
+        FONT_TICK = 6  # tick labels and annotations pt
+        FONT_CBAR = 6  # colorbar label pt
 
-        plt.figure(figsize=(10, 8))
-        sns.heatmap(
-            fn_grid,
-            xticklabels=[f"{m:.2g}" for m in means_range],
-            yticklabels=[f"{s:.2g}" for s in stds_range],
-            cmap="viridis",
-            annot=True,
-            fmt=".3f",
-            cbar_kws={"label": "Number of False negatives"},
-        )
-        plt.title(
-            "False Negative Sensitivity Matrix: Velocity Bias ($\mu$) vs. Jitter ($\sigma$)"
-        )
-        plt.xlabel("Velocity Noise Mean / Bias ($\mu$ in mm/s)")
-        plt.ylabel("Velocity Noise Std Dev / Jitter ($\sigma$ in mm/s)")
-        plt.gca().invert_yaxis()  # Low noise at bottom, high noise at top
-        plt.show()
+        data = np.load(archive_path)
+        means_range = data["means_range"]
+        stds_range = data["stds_range"]
+        n_cols = len(means_range)
+        n_rows = len(stds_range)
 
-        return rmse_grid, fitness_grid, src_grid, tgt_grid, fp_grid, fn_grid, clst_grid
+        # Height: preserve square cells, add a fixed margin for x-label + colorbar cap
+        LABEL_MARGIN = 0.55  # inches for xlabel + colorbar top cap
+        fig_h = IEEE_COL_W * (n_rows / n_cols) + LABEL_MARGIN
+
+        plots_config = [
+            {
+                "matrix": data["rmse_grid"],
+                "label": r"Mean reg. RMSE (mm)",
+                "fmt": ".3f",
+                "cmap": "viridis",  # lower is better; dark = high error
+                "file": "rmse_sensitivity_matrix_denoise.pdf",
+            },
+            {
+                "matrix": data["fitness_grid"],
+                "label": r"Mean fitness",
+                "fmt": ".2f",
+                "cmap": "viridis_r",  # reversed: dark = low fitness = bad
+                "file": "fitness_sensitivity_matrix_denoise.pdf",
+            },
+            {
+                "matrix": data["fp_grid"],
+                "label": r"False positives",
+                "fmt": ".1f",
+                "cmap": "Reds",  # red scale: "more = worse" is intuitive
+                "file": "fp_sensitivity_matrix_denoise.pdf",
+            },
+            {
+                "matrix": data["fn_grid"],
+                "label": r"False negatives",
+                "fmt": ".1f",
+                "cmap": "Reds",
+                "file": "fn_sensitivity_matrix_denoise.pdf",
+            },
+        ]
+
+        for cfg in plots_config:
+            fig, ax = plt.subplots(figsize=(IEEE_COL_W, fig_h))
+
+            sns.heatmap(
+                cfg["matrix"],
+                xticklabels=[f"{m:.2g}" for m in means_range],
+                yticklabels=[f"{s:.2g}" for s in stds_range],
+                cmap=cfg["cmap"],
+                annot=True,
+                fmt=cfg["fmt"],  # explicit format — no noisy floats
+                annot_kws={"size": FONT_TICK, "weight": "regular"},
+                linewidths=0.4,  # cell borders aid readability
+                linecolor="white",
+                square=True,  # keeps cells square regardless of fig size
+                cbar_kws={
+                    "label": cfg["label"],
+                    "shrink": 0.65,
+                    "aspect": 20,  # thinner bar = less visual weight
+                    "pad": 0.02,
+                },
+                ax=ax,
+            )
+
+            # cbar_kws doesn't reach tick labels — must set explicitly after draw
+            cbar = ax.collections[0].colorbar
+            cbar.ax.tick_params(labelsize=FONT_TICK, length=2, pad=2)
+            cbar.set_label(cfg["label"], size=FONT_CBAR, labelpad=4)
+
+            ax.set_xlabel(
+                r"Velocity noise bias $\mu$ (mm$\,$s$^{-1}$)",
+                fontsize=FONT_LABEL,
+                labelpad=3,
+            )
+            ax.set_ylabel(
+                r"Velocity noise jitter $\sigma$ (mm$\,$s$^{-1}$)",
+                fontsize=FONT_LABEL,
+                labelpad=3,
+            )
+            ax.tick_params(
+                axis="both", which="major", labelsize=FONT_TICK, length=2, pad=2
+            )
+
+            # Rotate x-labels to prevent overlap on dense axes
+            ax.set_xticklabels(ax.get_xticklabels(), rotation=45, ha="right")
+            ax.set_yticklabels(ax.get_yticklabels(), rotation=0)
+            ax.invert_yaxis()
+
+            fig.savefig(
+                os.path.join(figs_output_dir, cfg["file"]),
+                bbox_inches="tight",
+                dpi=300,  # ensures annotation text rasterises cleanly inside PDF
+                transparent=True,
+            )
+            plt.close(fig)
+            print(f"Generated: {cfg['file']}")
 
     def run_noise_delay_sweep(
         self,
@@ -447,24 +481,21 @@ class DataAnalysis:
         csv_path,
         time_delays,
         mc_iterations=10,
+        output_dir="../data/sweep_results",
     ):
         """
-        Sweeps a 1D time delay on the velocity measurement
+        Sweeps a 1D time delay on the velocity measurement and saves the
+        numerical arrays to a compressed archive. No plotting or cluster saving occurs.
         """
-
-        df_base = pd.read_csv(csv_path)
+        os.makedirs(output_dir, exist_ok=True)
 
         rmse, fitness, fn, fp = [], [], [], []
-        clusters = np.empty(len(time_delays), dtype=object)
+        df_base = pd.read_csv(csv_path)
 
-        # Iterate through the grid
         for i, delay in enumerate(tqdm(time_delays, desc="Delay sweep", position=0)):
-
             iter_rmse, iter_fitness, iter_fp, iter_fn = [], [], [], []
 
             for _ in range(mc_iterations):
-
-                # Load baseline dataframe
                 df_delayed = df_base.copy()
                 df_delayed["Time_s"] += delay
 
@@ -477,10 +508,8 @@ class DataAnalysis:
                         speed_data=df_delayed,
                         **self.pipe_params,
                     )
-
                     metrics = pip.run()
 
-                    # Extract metrics populated inside the pipeline instance
                     iter_fitness.append(pip.fitness)
                     iter_rmse.append(pip.rmse)
                     iter_fp.append(pip.fp)
@@ -490,136 +519,148 @@ class DataAnalysis:
                     log.warning(f"Iteration failed: {e}")
                     continue
 
-            # Store average performance for this specific noise profile
+            # Aggregate averages safely
             fitness.append(np.mean(iter_fitness) if iter_fitness else np.nan)
             rmse.append(np.mean(iter_rmse) if iter_rmse else np.nan)
             fn.append(np.mean(iter_fn) if iter_fn else np.nan)
             fp.append(np.mean(iter_fp) if iter_fp else np.nan)
 
-            cluster_cloud = self.det.color_point_cloud_by_labels(
-                pip.alg_src, pip.labels, downsample=0.001, write=False, vis=False
-            )
-
-            clusters[i] = cluster_cloud
-
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
-
-        # Panel 1: Geometric Alignment Metrics (Dual Y-Axes)
-        color = "#2b5c8f"
-        ax1.set_xlabel(r"Time Delay $\Delta t$ (s)")
-        ax1.set_ylabel("Registration RMSE (mm)", color=color)
-        line1 = ax1.plot(
-            time_delays, rmse, color=color, marker="o", linewidth=2, label="Mean RMSE"
+        # Serialize numerical arrays to disk
+        archive_path = os.path.join(output_dir, "delay_sweep_metrics.npz")
+        np.savez_compressed(
+            archive_path,
+            time_delays=time_delays,
+            rmse=np.array(rmse),
+            fitness=np.array(fitness),
+            fn=np.array(fn),
+            fp=np.array(fp),
         )
-        ax1.tick_params(axis="y", labelcolor=color)
-        ax1.grid(True, linestyle=":", alpha=0.6)
+
+        print(f"Delay sweep metrics written successfully to {archive_path}")
+        return archive_path
+
+    def plot_saved_delay_results(
+        self, archive_path, figs_output_dir="../data/figs/latest"
+    ):
+        """Loads raw arrays from disk and outputs publication-ready IEEE line figures."""
+        os.makedirs(figs_output_dir, exist_ok=True)
+        plt.style.use(["science", "ieee"])  # ieee, not just science
+
+        # Consistent font constants (mirrors heatmap code)
+        FONT_LABEL = 7
+        FONT_TICK = 6
+        FONT_LEG = 6
+
+        # Clearly distinct, print-safe color pairs
+        COLOR_RMSE = "#2b5c8f"  # blue
+        COLOR_FITNESS = "#d4700a"  # amber — replaces "darkorange", more muted in print
+        COLOR_FP = "#b22222"  # firebrick — replaces "crimson"
+        COLOR_FN = "#4a7c4e"  # forest green — NOT black; survives grayscale
+
+        data = np.load(archive_path)
+        time_delays = data["time_delays"]
+        rmse = data["rmse"]
+        fitness = data["fitness"]
+        fp = data["fp"]
+        fn = data["fn"]
+
+        # --- Figure 1: Geometric Alignment Metrics (Dual Y-Axes) ---
+        fig1, ax1 = plt.subplots(figsize=(3.5, 2.6), constrained_layout=True)
+
+        ax1.set_xlabel(r"Time delay $\Delta t$ (s)", fontsize=FONT_LABEL)
+        ax1.set_ylabel("Registration RMSE (mm)", color=COLOR_RMSE, fontsize=FONT_LABEL)
+        line1 = ax1.plot(
+            time_delays,
+            rmse,
+            color=COLOR_RMSE,
+            marker="o",
+            linewidth=1.2,
+            markersize=3,
+            label="RMSE",
+        )
+        ax1.tick_params(axis="y", labelcolor=COLOR_RMSE, labelsize=FONT_TICK)
+        ax1.tick_params(axis="x", labelsize=FONT_TICK)
+        ax1.grid(True, linestyle=":", alpha=0.4)
 
         ax1_twin = ax1.twinx()
-        color = "darkorange"
-        ax1_twin.set_ylabel("ICP Alignment Fitness", color=color)
+        ax1_twin.set_ylabel(
+            "ICP alignment fitness", color=COLOR_FITNESS, fontsize=FONT_LABEL
+        )
         line2 = ax1_twin.plot(
             time_delays,
             fitness,
-            color=color,
+            color=COLOR_FITNESS,
             marker="s",
             linestyle="--",
-            linewidth=2,
-            label="Mean Fitness",
+            linewidth=1.2,
+            markersize=3,
+            label="Fitness",
         )
-        ax1_twin.tick_params(axis="y", labelcolor=color)
+        ax1_twin.tick_params(axis="y", labelcolor=COLOR_FITNESS, labelsize=FONT_TICK)
 
-        # Unified legend for dual axis panel
         lines = line1 + line2
         labels = [l.get_label() for l in lines]
-        ax1.legend(lines, labels, loc=0)
-        ax1.set_title("Registration Sensitivity to Temporal Delays")
+        ax1.legend(
+            lines,
+            labels,
+            loc="upper left",
+            fontsize=FONT_LEG,
+            frameon=True,
+            facecolor="white",
+            edgecolor="none",
+            borderpad=0.4,
+        )
 
-        # Panel 2: Damage Classification Metrics (False Positives & False Negatives)
+        fig1.savefig(
+            os.path.join(figs_output_dir, "time_delay_registration.pdf"),
+            bbox_inches="tight",
+            dpi=300,
+            transparent=True,
+        )
+        plt.close(fig1)
+
+        # --- Figure 2: Damage Classification Metrics (FP & FN) ---
+        fig2, ax2 = plt.subplots(figsize=(3.5, 2.6), constrained_layout=True)
+
         ax2.plot(
             time_delays,
             fp,
-            color="crimson",
-            marker="v",
-            linewidth=2,
-            label="False Positives (FP)",
+            color=COLOR_FP,
+            marker="o",
+            linewidth=1.2,
+            markersize=3,
+            label="False positives",
         )
         ax2.plot(
             time_delays,
             fn,
-            color="black",
-            marker="^",
-            linewidth=2,
-            linestyle=":",
-            label="False Negatives (FN)",
+            color=COLOR_FN,
+            marker="s",
+            linestyle="--",
+            linewidth=1.2,
+            markersize=3,
+            label="False negatives",
         )
-        ax2.set_xlabel(r"Time Delay $\Delta t$ (s)")
-        ax2.set_ylabel("Defect Classification Error Count")
-        ax2.set_title("Damage Segmentation Accuracy vs. Time Delay")
-        ax2.grid(True, linestyle=":", alpha=0.6)
-        ax2.legend(loc=0)
+        ax2.set_xlabel(r"Time delay $\Delta t$ (s)", fontsize=FONT_LABEL)
+        ax2.set_ylabel("Classification error count", fontsize=FONT_LABEL)
+        ax2.tick_params(axis="both", labelsize=FONT_TICK)
+        ax2.yaxis.set_major_locator(
+            MaxNLocator(integer=True)
+        )  # no fractional count ticks
+        ax2.grid(True, linestyle=":", alpha=0.4)
+        ax2.legend(
+            loc="upper left",
+            fontsize=FONT_LEG,
+            frameon=True,
+            facecolor="white",
+            edgecolor="none",
+            borderpad=0.4,
+        )
 
-        plt.tight_layout()
-        plt.savefig("time_delay_sweep_analysis.png", dpi=300)
-
-        return rmse, fitness, fn, fp, clusters
-
-
-# def detection_iteration(
-#     self, df_noisy, pcd, gt_pcd, tgt_reg, uniform_downsample=True, detect=False
-# ):
-#     pc_corrected = self.reg.velocity_correction(
-#         df_noisy, pcd, denoise=False, visualise=False
-#     )
-#     # pc_corrected = det.select_bus_hull(
-#     #     pc_corrected, eps=2.0, visualise=False
-#     # )
-
-#     if uniform_downsample:
-#         pc_reg = pc_corrected.uniform_down_sample(20)
-#     else:
-#         pc_reg = self.reg.downsample(pc_corrected, ratio=0.001)
-
-#     icp, _, _ = self.reg.register(pc_reg, tgt_reg, ransac_retries=3)
-
-#     eval = self.reg.evaluate_alignment(pc_corrected, gt_pcd, icp.transformation)
-
-#     fitness = eval.fitness
-#     rmse = eval.inlier_rmse
-
-#     pc_corrected = pc_corrected.transform(icp.transformation)
-
-#     if detect:
-#         mask, distances, threshold = self.det.detect_damage(
-#             pc_corrected,
-#             gt_pcd,
-#             sigma_thresh=self.sigma_thresh,
-#             percentile=self.percentile,
-#             bidirectional=True,  # new gate
-#             outliers_points=200,
-#             radius=2,
-#         )
-
-#         mask = self.det.crop_damage(pc_corrected, mask, 55, 30)
-
-#         labels = self.det.cluster(
-#             pc_corrected,
-#             mask,
-#             eps=self.cluster_eps,
-#             min_samples=self.cluster_min_samples,
-#             verbose=False,
-#         )
-
-#         metrics = self.det.calculate_damage_metrics(
-#             pc_corrected, distances, labels, write_to_pd=True, verbose=False
-#         )
-
-#         n_clusters = len(set(labels[labels >= 0]))
-#         log.info("Found %d damage cluster(s)", n_clusters)
-
-#         number_fp, number_fn = self.det.compare_cluster_runs(
-#             self.gt_parquet_path, self.guess_parquet_path, 5, True, True
-#         )
-
-#         return fitness, rmse, pc_corrected, number_fp, number_fn
-#     else:
-#         return fitness, rmse, pc_corrected
+        fig2.savefig(
+            os.path.join(figs_output_dir, "time_delay_segmentation.pdf"),
+            bbox_inches="tight",
+            dpi=300,
+            transparent=True,
+        )
+        plt.close(fig2)

@@ -4,6 +4,8 @@ import logging
 import pandas as pd
 import matplotlib.pyplot as plt
 
+import scienceplots
+
 from registration import Registration
 from damage_detection import DamageDetector
 
@@ -12,6 +14,9 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
 )
+
+plt.style.use("science")
+# plt.style.use(["science", "ieee"])
 
 reg = Registration(5)
 det = DamageDetector()
@@ -40,7 +45,7 @@ if __name__ == "__main__":
 
     # PC_corrected = PC_velocity_correction(v_noisy, T_0, T_e, FPS, C_d, src_raw)
     PC_corrected = reg.velocity_correction_cont(
-        df_delayed, src, downsample_step=20, visualise=True
+        df_delayed, src, downsample_step=10, visualise=True
     )
     # print(f"Original point-cloud shape: {src_raw.shape}")
     # print(f"Corrected point_cloud shape: {PC_corrected.scale}")
@@ -51,8 +56,8 @@ if __name__ == "__main__":
     # PC_corrected_o3d.paint_uniform_color([1, 0.2, 0])
     # PC_corrected = reg.downsample(PC_corrected, ratio=0.001)
 
-    o3d.visualization.draw_geometries([reg.downsample(src, ratio=0.002)])
-    o3d.visualization.draw_geometries([reg.downsample(PC_corrected, ratio=0.002)])
+    # o3d.visualization.draw_geometries([reg.downsample(src, ratio=0.002)])
+    # o3d.visualization.draw_geometries([reg.downsample(PC_corrected, ratio=0.002)])
 
     # icp, _, _ = reg.register(PC_corrected, tgt)
     # # icp = reg.get_initial_guess(PC_corrected, tgt)

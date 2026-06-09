@@ -26,8 +26,8 @@ det = DamageDetector()
 # Setup execution context
 if __name__ == "__main__":
 
-    # tgt_test = "../data/bus/gt/bus4.ply"
-    tgt_test = "../data/CC/alg_source_CC.ply"
+    tgt_test = "../data/bus/gt/bus4.ply"
+    # tgt_test = "../data/bus/scaled_speed_bus4.ply"
     # src_test = "../data/bus/lighting/bus4_lightson.ply"
 
     src_test = "../data/bus/snelheid_test_bus4.ply"
@@ -65,61 +65,58 @@ if __name__ == "__main__":
 
     # list of biases to test (e.g., odometer under-registering or over-registering)
     # means = np.linspace(-0.5, 0.5, 3)
-    means = np.linspace(-0.025, 0.025, 3)
+    means = np.linspace(-0.025, 0.025, 11)
 
     # list of random noise levels to test
     # stds = np.linspace(0.0, 0.5, 3)
-    stds = np.linspace(0.0, 0.03, 3)
+    stds = np.linspace(0.0, 0.03, 6)
 
-    rmsegrid, fitnessgrid, src_grid, tgt_grid, fp_grid, fn_grid, clustr_grid = (
-        dt.run_noise_grid_sweep(
-            src_test,
-            tgt_test,
-            v_csv,
-            means,
-            stds,
-            mc_iterations=1,
-            uniform_downsample=True,
-            detect=True,
-        )
-    )
+    # archive1 = dt.run_noise_grid_sweep(
+    #     src_test, tgt_test, v_csv, means, stds, mc_iterations=3
+    # )
 
-    # topleft = src_grid[0, 0]
-    # topright = src_grid[0, -1]
-    # bottomleft = src_grid[-1, 0]
-    # bottomright = src_grid[-1, -1]
+    # Tweak and run this as many times as you want to change labels, fonts, or cmaps
+    # archive = "../data/sweep_results/sweep_metrics_denoise.npz"
+    # dt.plot_saved_sweep_results(archive)
 
-    # topleft_t = tgt_grid[0, 0]
-    # topright_t = tgt_grid[0, -1]
-    # bottomleft_t = tgt_grid[-1, 0]
-    # bottomright_t = tgt_grid[-1, -1]
+    # # topleft = src_grid[0, 0]
+    # # topright = src_grid[0, -1]
+    # # bottomleft = src_grid[-1, 0]
+    # # bottomright = src_grid[-1, -1]
 
-    c1 = clustr_grid[0, 0]
-    c2 = clustr_grid[0, -1]
-    c3 = clustr_grid[-1, 0]
-    c4 = clustr_grid[-1, -1]
+    # # topleft_t = tgt_grid[0, 0]
+    # # topright_t = tgt_grid[0, -1]
+    # # bottomleft_t = tgt_grid[-1, 0]
+    # # bottomright_t = tgt_grid[-1, -1]
 
-    # # o3d.visualization.draw_geometries([topleft, topleft_t])
-    # # o3d.visualization.draw_geometries([topright, topright_t])
-    # # o3d.visualization.draw_geometries([bottomleft, bottomleft_t])
-    # # o3d.visualization.draw_geometries([bottomright, bottomright_t])
+    # c1 = clustr_grid[0, 0]
+    # c2 = clustr_grid[0, -1]
+    # c3 = clustr_grid[-1, 0]
+    # c4 = clustr_grid[-1, -1]
 
-    o3d.visualization.draw_geometries([c1])
-    o3d.visualization.draw_geometries([c2])
-    o3d.visualization.draw_geometries([c3])
-    o3d.visualization.draw_geometries([c4])
+    # # # o3d.visualization.draw_geometries([topleft, topleft_t])
+    # # # o3d.visualization.draw_geometries([topright, topright_t])
+    # # # o3d.visualization.draw_geometries([bottomleft, bottomleft_t])
+    # # # o3d.visualization.draw_geometries([bottomright, bottomright_t])
 
-    # delays = np.linspace(-0.1, 0.1, 21)
+    # o3d.visualization.draw_geometries([c1])
+    # o3d.visualization.draw_geometries([c2])
+    # o3d.visualization.draw_geometries([c3])
+    # o3d.visualization.draw_geometries([c4])
 
-    # rmse, fitness, fn, fp, clusters = dt.run_noise_delay_sweep(
+    delays = np.linspace(-0.1, 0.1, 21)
+
+    # archive = dt.run_noise_delay_sweep(
     #     src_test,
     #     tgt_test,
     #     v_csv,
     #     delays,
-    #     mc_iterations=1,
+    #     mc_iterations=3,
     # )
-    # for i in range(len(clusters)):
-    #     o3d.visualization.draw_geometries([clusters[i]])
+
+    # archive = "../data/sweep_results/delay_sweep_metrics.npz"
+
+    # dt.plot_saved_delay_results(archive)
 
     # delay_std = 0.03
 
@@ -127,10 +124,14 @@ if __name__ == "__main__":
     #     src_path=src_test,
     #     tgt_path=tgt_test,
     #     csv_path=v_csv,
-    #     num_iterations=50,
+    #     num_iterations=200,
     #     delay_std=delay_std,
     # )
 
     # dt.plot_monte_carlo_results(
     #     rmse_res=rmse, fitness_res=fitness, fn_res=fn, fp_res=fp, noise_std=delay_std
     # )
+
+    epss = np.linspace(0.6, 2.0, 15)
+    min_samples = np.arange(150, 400, 15, dtype=int)
+    print(epss, min_samples)

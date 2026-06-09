@@ -10,6 +10,8 @@ import pandas as pd
 
 from scipy.spatial import ConvexHull, cKDTree
 from scipy.signal import medfilt, wiener
+from scipy.spatial import convex_hull_plot_2d
+from scipy.stats import zscore
 
 
 class DamageDetector:
@@ -539,6 +541,8 @@ class DamageDetector:
             # evecs[:, 1:] define the flat 2D plane.
             local_2d = centered @ evecs[:, 1:]
 
+            local_2d = self.filter_spatial_outliers(local_2d, 2.5)
+
             # 2. Compute exact area using Convex Hull (ignores point density)
             try:
                 hull = ConvexHull(local_2d)
@@ -546,6 +550,9 @@ class DamageDetector:
                     hull.volume
                 )  # In 2D, scipy hull.volume is the area
                 perimeter = float(hull.area)
+
+                if verbose:
+                    self.visualize_hull(local_2d, hull, id)
             except Exception as e:
                 Warning(f"Convex hull failed for cluster {id}: {e}")
                 projected_area = 0.0
@@ -620,6 +627,52 @@ class DamageDetector:
             )
 
         return all_metrics
+
+    def filter_spatial_outliers(self, local_2d, threshold=2.5):
+        """Removes stray noise points using a Z-score threshold on distances to the cluster center."""
+        distances = np.linalg.norm(local_2d, axis=1)
+        z_scores = zscore(distances)
+
+        # Keep points within the threshold (e.g., 2.5 standard deviations)
+        return local_2d[np.abs(z_scores) < threshold]
+
+    def visualize_hull(self, local_2d, hull, cluster_id):
+        """Plots the 2D projected points and the calculated convex hull."""
+        fig, ax = plt.subplots(figsize=(6, 6))
+
+        # Plot the projected 2D points
+        ax.plot(
+            local_2d[:, 0],
+            local_2d[:, 1],
+            "o",
+            color="blue",
+            markersize=3,
+            label="Projected Points",
+        )
+
+        # Plot the hull vertices and lines
+        for simplex in hull.simplices:
+            ax.plot(local_2d[simplex, 0], local_2d[simplex, 1], "r-", linewidth=2)
+
+        # Highlight vertices
+        ax.plot(
+            local_2d[hull.vertices, 0],
+            local_2d[hull.vertices, 1],
+            "ro",
+            markersize=6,
+            label="Hull Vertices",
+        )
+
+        ax.set_title(
+            f"Cluster {cluster_id} - Convex Hull Verification. Number of points: {len(local_2d)}"
+        )
+        ax.set_xlabel("Local X' (PCA Eigenvector 1)")
+        ax.set_ylabel("Local Y' (PCA Eigenvector 2)")
+        ax.axis("equal")
+        ax.grid(True, linestyle="--", alpha=0.6)
+        ax.legend()
+
+        plt.savefig(f"../data/figs/hulls/hull_{cluster_id}")
 
     def compare_cluster_runs(
         self,
