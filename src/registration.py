@@ -161,7 +161,7 @@ class Registration:
         pcd,
         method="akima",
         denoise=False,
-        downsample_step=60,
+        downsample_step=5,
         visualise=True,
     ):
         """
@@ -617,7 +617,7 @@ class Registration:
         """
         results = []
 
-        global_benchmark = f.benchmark_global_method(src, tgt)
+        global_benchmark = self.benchmark_global_method(src, tgt)
         results.append(global_benchmark)
 
         init_guess = global_benchmark["transformation"]
