@@ -9,11 +9,6 @@ from damage_detection import DamageDetector
 from cloud_compare import CloudCompare
 
 log = logging.getLogger(__name__)
-# logging.basicConfig(
-#     filename="../data/run.log",
-#     level=logging.INFO,
-#     format="%(asctime)s [%(levelname)s] %(message)s",
-# )
 
 
 class Pipeline:
@@ -49,6 +44,7 @@ class Pipeline:
         skip_reg=False,
         write: bool = False,
     ):
+        # Initialising class parameters
         self.reg = Registration(voxel_size)
         self.det = DamageDetector()
         self.ccl = CloudCompare(comp_path=source_path, ref_path=target_path)
@@ -83,15 +79,24 @@ class Pipeline:
         self.gt_parquet_path = "../data/bus4_gt.parquet"
         self.guess_parquet_path = "../data/damage_metrics.parquet"
 
+        src_name = source_path.split(".")[-2]
+        src_name = src_name.split("/")[-1]
+        tgt_name = target_path.split(".")[-2]
+        tgt_name = tgt_name.split("/")[-1]
+
+        log.info(f"Comparing source cloud {src_name} with reference cloud {tgt_name}")
+
         self.src = src_pcd if src_pcd is not None else self.reg.load_pcd(source_path)
         self.tgt = tgt_pcd if tgt_pcd is not None else self.reg.load_pcd(target_path)
 
+        # Applying transform so that point cloud of bus is aligned along default visibility axes of open3d
         self.tgt = self.tgt.transform(self.reg.tf)
 
+        # For those point clouds that were acquired with a complex velocity profile
         if self.velocity_scale:
             log.info("Scaling bus point cloud based on velocity...")
             if speed_data is None:
-                self.src = self.reg.velocity_correction_cont(
+                self.src = self.reg.velocity_correction(
                     "../data/bus/speed_files/speed_bus4.csv",
                     self.src,
                     denoise=False,
@@ -105,12 +110,14 @@ class Pipeline:
 
         self.src = self.src.transform(self.reg.tf)
 
+        # Segmenting bus hull
         if self.select_hull:
             if not skip_reg:
                 log.info("Segmenting bus hull...")
                 self.src = self.det.select_bus_hull(self.src, eps=2.1, visualise=False)
                 self.tgt = self.det.select_bus_hull(self.tgt, eps=2.05, visualise=False)
 
+        # Statistical Outlier Removal (not used in paper)
         if self.sor_neighbours is not None:
             log.info("Removing statistical outliers...")
             self.src, removed = self.reg.SOR(
@@ -135,6 +142,7 @@ class Pipeline:
         self.fn = None
         self.n_clusters = None
 
+    # Overall pipeline execution function
     def run(self):
         # self.reg.set_voxel(self.tgt)
         log.info(f"Number of points in point cloud: {len(self.tgt.points)}")
@@ -159,6 +167,7 @@ class Pipeline:
     def _register(self):
         log.info("Starting registration...")
 
+        # Used for testing purposes to register on a downsampled cloud, which speeded up computation. Not used for results pipeline
         if self.downsample_reg:
             self.tgt_reg = self.tgt.uniform_down_sample(15)
             self.reg.set_voxel(self.tgt_reg, ratio=0.03)
@@ -176,6 +185,8 @@ class Pipeline:
 
             self.transformation = icp.transformation
             self.alg_src = copy.deepcopy(self.src).transform(self.transformation)
+
+        # Standard registration step of pipeline
         else:
             icp, _, eval = self.reg.register(self.src, self.tgt)
 
@@ -205,6 +216,7 @@ class Pipeline:
     def _detect(self):
         log.info("Running damage detection...")
 
+        # Deprecated, used to initially segment away bus wheels
         if self.crop and not self.select_hull:
             self.alg_src = self.det.crop_wheels_circular(self.alg_src)
 
@@ -212,6 +224,7 @@ class Pipeline:
             o3d.io.write_point_cloud(self.aligned_path, self.alg_src)
             o3d.io.write_point_cloud(self.tgt_path, self.tgt)
 
+        # Option to execute C2C distance calculation using CloudCompare backend
         if self.cc:
             log.info("Running CloudCompare backend")
 
@@ -242,6 +255,7 @@ class Pipeline:
 
         log.info("Damage classified above a threshold of %f", threshold)
 
+        # Spatial boundary cropping
         if self.crop:
             self.mask = self.det.crop_damage(self.alg_src, self.mask, 55, 10)
 
@@ -255,6 +269,7 @@ class Pipeline:
                 self.alg_src, self.mask, downsample=0.001, write=self.write
             )
 
+    # Clustering candidate damage set in to separate damage regions
     def _cluster(self):
         log.info(f"Clustering damage regions (Fast cluster: {self.fast_cluster})...")
         if not self.fast_cluster:
@@ -293,51 +308,3 @@ class Pipeline:
     def _benchmark(self):
         log.info("Benchmarking registration methods")
         self.reg.benchmark(self.src, self.tgt)
-
-
-# src = "../data/block/block_damage_accel.ply"
-# tgt = "../data/block/block_angle.ply"
-
-# cluster_eps = 0.55
-# cluster_samples = 70
-
-# src = "../data/bus/bus_damagev2.ply"
-# tgt = "../data/bus/bus.ply"
-
-# src = "../data/bus/bus_7damage.ply"
-# tgt = "../data/bus/bus_4damage.ply"
-
-
-# src = "../data/bus/bus_damagev3.ply"
-# tgt = "../data/bus/bus_v2.ply"
-
-# cluster_eps = 1.5
-# cluster_samples = 150
-
-
-# Bus
-# pip = Pipeline(
-#     src,
-#     tgt,
-#     plane_fit_dist_th=None,
-#     select_hull=False,
-#     sor_neighbours=100,
-#     sor_std=1.2,
-#     voxel_size=5,
-#     sigma_thresh=4.0,
-#     percentile=80.0,
-#     crop=True,
-#     cluster_eps=cluster_eps,
-#     cluster_min_samples=cluster_samples,
-#     fast_cluster=False,
-#     min_fitness=0.98,
-#     visualise=True,
-#     benchmark=False,
-#     cc=False,
-#     c2c=False,
-#     m3c2=True,
-#     skip_reg=False,
-#     write=False,
-# )
-
-# pip.run()

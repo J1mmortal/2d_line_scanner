@@ -28,7 +28,7 @@ class CloudCompare:
 
     def run_c2c(self):
         """
-        Executes CloudCompare C2C distance calculation headlessly.
+        Executes CloudCompare C2C distance calculation.
         Returns the path to the newly generated file.
         """
 

@@ -13,24 +13,18 @@ logging.basicConfig(
 
 from pipeline import Pipeline
 
-# Point clouds
-# src = "../data/bus/bus_damagev3.ply"
-# tgt = "../data/bus/bus_v2.ply"
-
-# src3 = "../data/bus/damage3.ply"
-# tgt3 = "../data/bus/bus3.ply"
-
-# src = "../data/bus/damage_80fps.ply"
-# tgt = "../data/bus/bus_80fps.ply"
+### --- Points clouds tested ---
 
 # src_test = "../data/bus/bus4_damage.ply"
-# tgt_test = "../data/bus/gt/bus4.ply"
-
 tgt_test = "../data/bus/gt/bus4.ply"
-# tgt_test = "../data/bus/scaled_speed_bus4.ply"
-# src_test = "../data/bus/lighting/bus4_lightson.ply"
-
 src_test = "../data/bus/snelheid_test_bus4.ply"
+
+# tgt_sticker = "../data/bus/stickers/bus1_stpr.ply"
+# src_sticker = "../data/bus/stickers/bus1_sticker.ply"
+
+# tgt_dry = "../data/bus/wet/bus3_dry.ply"
+# src_wet = "../data/bus/wet/bus3_wet.ply"
+# src_superwet = "../data/bus/wet/bus3_superwet.ply"
 
 # src_sun = r"..\data\bus\lighting\bus4_sun.ply"
 # src_light = r"..\data\bus\lighting\bus4_lightson.ply"
@@ -38,6 +32,19 @@ src_test = "../data/bus/snelheid_test_bus4.ply"
 
 # tgt_sun = r"..\data\bus\lighting\bus3_sun.ply"
 # tgt_dark = r"..\data\bus\lighting\bus3_lightsoff.ply"
+
+# tgt_0 = "../data/bus/angles/bus3_0.ply"
+# src_05 = "../data/bus/angles/bus3_0.5.ply"
+# src_15 = "../data/bus/angles/bus3_1.5.ply"
+# src_07 = "../data/bus/angles/bus3_-0.7.ply"
+# src_min15 = "../data/bus/angles/bus3_-1.5.ply"
+# src_min20 = "../data/bus/angles/bus3_-2.0.ply"
+# src_0 = "../data/bus/angles/bus4_0.ply"
+# src_1 = "../data/bus/angles/bus4_1.ply"
+# src_2 = "../data/bus/angles/bus4_2.ply"
+# src_min1 = "../data/bus/angles/bus4_-1.ply"
+# src_min2 = "../data/bus/angles/bus4_-2.ply"
+
 
 # Initial plane / hull fitting / cropping
 select_hull = True
@@ -49,7 +56,7 @@ sor_std = 4  # 1.2, 4
 
 # Registsration parameters
 voxel_size = 5
-min_fitness = 0.98
+min_fitness = 0.95
 downsample_reg = False
 
 # Noise estimation parameters (4.0, 80)
