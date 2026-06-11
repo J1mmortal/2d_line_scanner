@@ -42,7 +42,7 @@ The pipeline expects a specific relative directory structure located one level a
 │   ├── sweep_results/
 │   ├── bus4_gt.parquet
 │   └── damage_metrics.parquet
-└── vehicle-damage-detection/  <-- (Repository Root)
+└── src/  <-- (Repository Root)
     ├── main.py
     ├── pipeline.py
     └── ...
