@@ -1,4 +1,4 @@
-# Vehicle Damage Detection Pipeline
+# Automated Dent Detection for Transit Buses Using 2D Laser Profilers
 
 This repository contains a 3D point cloud processing pipeline designed to identify, cluster, and quantify surface deformations (dents) on buses from raw 2D laser profiler data.
 
